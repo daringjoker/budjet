@@ -3,30 +3,41 @@ import type { CreateTRPCClient } from '@trpc/client'
 import type { AppRouter } from '@budjet/backend/trpc'
 import chalk from 'chalk'
 import * as readline from 'readline/promises'
+import { date, heading, money } from '../lib/format.js'
 
 type TrpcClient = CreateTRPCClient<AppRouter>
 
 export function registerReviewCommands(program: Command, trpc: TrpcClient) {
-  program.command('review')
-    .description('Review low-confidence parsed transactions')
+  program
+    .command('review')
+    .description('Review low-confidence parsed transactions interactively')
     .action(async () => {
       const list = await trpc.transactions.list.query({ lowConfidenceOnly: true, limit: 20 })
-      const lowConf = list.filter(t => t.llmConfidence !== null && t.llmConfidence < 0.85)
-      if (!lowConf.length) { console.log(chalk.green('No transactions need review.')); return }
+      const lowConf = list.filter((t) => t.llmConfidence !== null && t.llmConfidence < 0.85)
+      if (!lowConf.length) {
+        console.log(chalk.green('✓ No transactions need review.'))
+        return
+      }
 
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-      console.log(chalk.bold(`\n${lowConf.length} transactions need review:\n`))
+      console.log()
+      console.log(heading(`${lowConf.length} transaction${lowConf.length === 1 ? '' : 's'} need review`))
+      console.log()
       try {
         for (const t of lowConf) {
-          const dateStr = typeof t.date === 'string' ? t.date.slice(0, 10) : (t.date as Date).toISOString().slice(0, 10)
-          console.log(`  ID: ${t.id} | ${dateStr} | ${t.type} ${t.amount} ${t.currency}`)
-          console.log(`  Description: ${chalk.yellow(t.description)} (confidence: ${t.llmConfidence?.toFixed(2)})`)
-          const newDesc = await rl.question('  New description (Enter to keep): ')
+          const amount =
+            t.type === 'debit'
+              ? chalk.red(`−${money(t.amount, t.currency)}`)
+              : chalk.green(`+${money(t.amount, t.currency)}`)
+          console.log(`${chalk.dim(`#${t.id}`)}  ${date(t.date)}  ${amount}`)
+          console.log(`  ${chalk.dim('description')}  ${chalk.yellow(t.description)}`)
+          console.log(`  ${chalk.dim('confidence')}   ${chalk.yellow(`⚠ ${t.llmConfidence?.toFixed(2)}`)}`)
+          const newDesc = await rl.question(`  ${chalk.dim('new description (Enter to keep):')} `)
           if (newDesc.trim()) {
             await trpc.transactions.review.mutate({ id: t.id, description: newDesc.trim(), llmConfidence: null })
-            console.log(chalk.green('  ✓ Updated\n'))
+            console.log(`  ${chalk.green('✓ updated')}\n`)
           } else {
-            console.log('  Skipped\n')
+            console.log(`  ${chalk.dim('skipped')}\n`)
           }
         }
       } finally {

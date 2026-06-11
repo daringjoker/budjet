@@ -19,8 +19,8 @@ export const trpc: CreateTRPCClient<AppRouter> = createTRPCClient<AppRouter>({
 
 const program = new Command()
   .name('budjet')
-  .description('Personal financial management CLI')
-  .version('0.0.1')
+  .description('Personal financial management CLI — accounts, transactions, budgets, recurring payments and reports')
+  .version('0.0.1', '-v, --version', 'Print the budjet CLI version')
 
 registerAccountsCommands(program, trpc)
 registerTransactionsCommands(program, trpc)
@@ -32,7 +32,13 @@ registerReportCommands(program, trpc)
 
 process.on('unhandledRejection', (err) => {
   const msg = err instanceof Error ? err.message : String(err)
-  console.error(chalk.red('Error: ' + msg))
+  if (msg.includes('ECONNREFUSED') || msg.includes('fetch failed')) {
+    console.error(chalk.red(`✗ Cannot connect to the Budjet backend at ${BACKEND_URL}`))
+    console.error(chalk.dim('  Start it with: pnpm --filter @budjet/backend dev'))
+    console.error(chalk.dim('  Override the URL with the BUDJET_API_URL environment variable.'))
+  } else {
+    console.error(chalk.red(`✗ ${msg}`))
+  }
   process.exit(1)
 })
 

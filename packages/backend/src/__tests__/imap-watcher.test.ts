@@ -17,7 +17,9 @@ describe('ImapWatcher', () => {
             from: [{ address: 'bank@test.com' }],
             date: new Date('2026-01-01'),
           },
-          bodyParts: new Map([['TEXT', Buffer.from('You spent NPR 500')]]),
+          source: Buffer.from(
+            'From: bank@test.com\r\nSubject: Transaction Alert\r\nContent-Type: text/plain\r\n\r\nYou spent NPR 500'
+          ),
           flags: new Set<string>(),
         }
       }),

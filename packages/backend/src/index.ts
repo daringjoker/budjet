@@ -28,7 +28,8 @@ async function main() {
   const dbAccounts = await db.select().from(accounts)
   const knownSenders = new Map(
     config.banks.map(b => {
-      const dbAcct = dbAccounts.find(a => a.emailSender === b.sender)
+      // A bank may alert from several addresses; match by sender, then bank name
+      const dbAcct = dbAccounts.find(a => a.emailSender === b.sender) ?? dbAccounts.find(a => a.name === b.name)
       return [b.sender.toLowerCase(), { name: b.name, currency: b.currency, accountId: dbAcct?.id }]
     })
   )

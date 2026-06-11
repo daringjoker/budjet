@@ -35,9 +35,11 @@ export class LLMPool {
   ) {}
 
   async init() {
+    // Under tsx the source .ts is executed directly; the worker file must match.
+    const workerFile = import.meta.url.endsWith('.ts') ? 'worker.ts' : 'worker.js'
     const workerPath = resolve(
       dirname(fileURLToPath(import.meta.url)),
-      'worker.js'
+      workerFile
     )
     for (let i = 0; i < this.cfg.workerCount; i++) {
       const worker = this.factory

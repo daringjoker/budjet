@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { ImapFlow, type ImapFlowOptions } from 'imapflow'
+import { extractEmailText } from './extract.js'
 
 export interface EmailEvent {
   messageId: string
@@ -55,12 +56,12 @@ export class ImapWatcher extends EventEmitter {
       for await (const msg of this.client.fetch('1:*', {
         uid: true,
         envelope: true,
-        bodyParts: ['TEXT'],
+        source: true,
         flags: true,
       })) {
         if (msg.flags?.has('\\Seen')) continue
-        const bodyBuffer = msg.bodyParts?.get('TEXT')
-        const bodyText = bodyBuffer ? bodyBuffer.toString('utf-8') : ''
+        // bodyParts TEXT is unreliable for multipart/HTML mail — parse the full source
+        const bodyText = msg.source ? await extractEmailText(msg.source) : ''
         const event: EmailEvent = {
           messageId: msg.envelope?.messageId ?? `${msg.uid}`,
           sender: msg.envelope?.from?.[0]?.address ?? '',

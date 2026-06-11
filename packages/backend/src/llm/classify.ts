@@ -30,7 +30,12 @@ export async function classifyEmail(
   const llama = context.model.llama
   const grammar = new LlamaJsonSchemaGrammar(llama, CLASSIFY_SCHEMA)
   const sequence = context.getSequence()
-  const session = new LlamaChatSession({ contextSequence: sequence })
-  const response = await session.prompt(buildClassifyPrompt(payload), { grammar, maxTokens: 64 })
-  return JSON.parse(response)
+  // The context has a finite sequence pool — dispose or the next call throws.
+  try {
+    const session = new LlamaChatSession({ contextSequence: sequence })
+    const response = await session.prompt(buildClassifyPrompt(payload), { grammar, maxTokens: 64 })
+    return JSON.parse(response)
+  } finally {
+    sequence.dispose()
+  }
 }

@@ -51,7 +51,12 @@ export async function parseTransaction(
   const llama = context.model.llama
   const grammar = new LlamaJsonSchemaGrammar(llama, PARSE_SCHEMA)
   const sequence = context.getSequence()
-  const session = new LlamaChatSession({ contextSequence: sequence })
-  const response = await session.prompt(buildParsePrompt(payload), { grammar, maxTokens: 256 })
-  return JSON.parse(response)
+  // The context has a finite sequence pool — dispose or the next call throws.
+  try {
+    const session = new LlamaChatSession({ contextSequence: sequence })
+    const response = await session.prompt(buildParsePrompt(payload), { grammar, maxTokens: 256 })
+    return JSON.parse(response)
+  } finally {
+    sequence.dispose()
+  }
 }

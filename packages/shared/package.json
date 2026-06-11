@@ -1,0 +1,22 @@
+{
+  "name": "@budjet/shared",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.30.0"
+  },
+  "devDependencies": {
+    "better-sqlite3": "^12.0.0",
+    "drizzle-kit": "^0.20.0",
+    "vitest": "^1.5.0",
+    "@types/better-sqlite3": "^7.6.0"
+  }
+}

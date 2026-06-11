@@ -4,7 +4,7 @@ export const categories = sqliteTable('categories', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   name: text('name').notNull(),
   color: text('color').notNull().default('#6366f1'),
-  parentId: integer('parent_id'),
+  parentId: integer('parent_id').references((): any => categories.id),
 })
 
 export type Category = typeof categories.$inferSelect

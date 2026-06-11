@@ -11,7 +11,7 @@ export const rawEmails = sqliteTable('raw_emails', {
   status: text('status', { enum: ['processed', 'unknown', 'failed'] })
     .notNull()
     .default('unknown'),
-  accountId: integer('account_id').references(() => accounts.id),
+  accountId: integer('account_id').references(() => accounts.id, { onDelete: 'set null' }),
 })
 
 export type RawEmail = typeof rawEmails.$inferSelect

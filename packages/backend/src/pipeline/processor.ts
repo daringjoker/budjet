@@ -1,0 +1,89 @@
+import { randomUUID } from 'crypto'
+import { eq } from 'drizzle-orm'
+import { rawEmails, transactions, accounts } from '@budjet/shared/schema'
+import type { Db } from '../db/index.js'
+import type { LLMPool } from '../llm/pool.js'
+import type { EmailEvent } from '../imap/watcher.js'
+import { detectRecurring } from './recurring-detector.js'
+
+interface BankEntry { name: string; currency: string; accountId?: number }
+
+export class Processor {
+  constructor(
+    private readonly db: Db,
+    private readonly knownSenders: Map<string, BankEntry>,
+    private readonly pool: LLMPool,
+    private readonly confidenceThreshold: number
+  ) {}
+
+  async process(email: EmailEvent) {
+    const bank = this.knownSenders.get(email.sender.toLowerCase())
+
+    if (!bank) {
+      await this.db.insert(rawEmails).values({
+        messageId: email.messageId,
+        sender: email.sender,
+        subject: email.subject,
+        bodyText: email.bodyText,
+        receivedAt: email.receivedAt,
+        status: 'unknown',
+      }).onConflictDoNothing()
+      return
+    }
+
+    const [savedEmail] = await this.db.insert(rawEmails).values({
+      messageId: email.messageId,
+      sender: email.sender,
+      subject: email.subject,
+      bodyText: email.bodyText,
+      receivedAt: email.receivedAt,
+      status: 'unknown',
+      accountId: bank.accountId,
+    }).onConflictDoNothing().returning()
+
+    if (!savedEmail) return // duplicate message_id
+
+    try {
+      const classification = await this.pool.run({
+        jobId: randomUUID(),
+        type: 'classify',
+        payload: { subject: email.subject, body: email.bodyText, bankName: bank.name },
+      }) as { type: string; confidence: number }
+
+      if (classification.type !== 'transaction') {
+        await this.db.update(rawEmails).set({ status: 'unknown' }).where(eq(rawEmails.id, savedEmail.id))
+        return
+      }
+
+      const parsed = await this.pool.run({
+        jobId: randomUUID(),
+        type: 'parse',
+        payload: { subject: email.subject, body: email.bodyText, bankName: bank.name },
+      }) as { amount: number; type: string; description: string; currency: string; balance_after?: number | null; confidence: number; date?: string }
+
+      const txDate = parsed.date ? new Date(parsed.date) : email.receivedAt
+
+      const [txn] = await this.db.insert(transactions).values({
+        accountId: bank.accountId!,
+        date: txDate,
+        amount: parsed.amount,
+        type: parsed.type as 'debit' | 'credit',
+        description: parsed.description,
+        currency: parsed.currency,
+        balanceAfter: parsed.balance_after ?? null,
+        source: 'email',
+        rawEmailId: savedEmail.id,
+        llmConfidence: parsed.confidence,
+        createdAt: new Date(),
+      }).returning()
+
+      await this.db.update(rawEmails).set({ status: 'processed' }).where(eq(rawEmails.id, savedEmail.id))
+
+      if (parsed.confidence >= this.confidenceThreshold) {
+        await detectRecurring(this.db, txn)
+      }
+    } catch {
+      await this.db.update(rawEmails).set({ status: 'failed' }).where(eq(rawEmails.id, savedEmail.id))
+    }
+  }
+}

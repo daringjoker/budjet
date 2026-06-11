@@ -1,0 +1,14 @@
+{
+  "banks": [
+    { "name": "NMB Bank", "sender": "alerts@nmb.com.np", "currency": "NPR" },
+    { "name": "Nabil Bank", "sender": "noreply@nabilbank.com", "currency": "NPR" }
+  ],
+  "llm": {
+    "modelPath": "./models/Qwen2.5-3B-Instruct-Q4_K_M.gguf",
+    "confidenceThreshold": 0.85,
+    "workerThreads": 1
+  },
+  "budget": {
+    "forecastLookbackDays": 90
+  }
+}

@@ -61,7 +61,19 @@ export class Processor {
         payload: { subject: email.subject, body: email.bodyText, bankName: bank.name },
       }) as { amount: number; type: string; description: string; currency: string; balance_after?: number | null; confidence: number; date?: string }
 
-      const txDate = parsed.date ? new Date(parsed.date) : email.receivedAt
+      // Zero/negative amounts mean the LLM force-fit a non-transaction notice
+      if (!(parsed.amount > 0)) {
+        await this.db.update(rawEmails).set({ status: 'unknown' }).where(eq(rawEmails.id, savedEmail.id))
+        return
+      }
+
+      // Distrust extracted dates far from the email's receive time (the model
+      // sometimes picks up unrelated dates, e.g. Bikram Sambat conversions)
+      let txDate = parsed.date ? new Date(parsed.date) : email.receivedAt
+      const driftMs = email.receivedAt.getTime() - txDate.getTime()
+      if (isNaN(txDate.getTime()) || driftMs > 45 * 86_400_000 || driftMs < -2 * 86_400_000) {
+        txDate = email.receivedAt
+      }
 
       const [txn] = await this.db.insert(transactions).values({
         accountId: bank.accountId!,

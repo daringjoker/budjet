@@ -6,7 +6,6 @@ import { budgetsRouter } from './routers/budgets.js'
 import { recurringRouter } from './routers/recurring.js'
 import { predictedRouter } from './routers/predicted.js'
 import { reportsRouter } from './routers/reports.js'
-import type { Context } from './trpc.js'
 
 export const appRouter = router({
   accounts: accountsRouter,

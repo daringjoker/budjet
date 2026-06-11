@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../trpc.js'
 import { accounts } from '@budjet/shared/schema'
 import { eq } from 'drizzle-orm'
@@ -32,14 +33,20 @@ export const accountsRouter = router({
       id: z.number(),
       name: z.string().min(1).optional(),
       type: accountTypeEnum.optional(),
-      bankName: z.string().optional(),
+      bankName: z.string().nullable().optional(),
       emailSender: z.string().email().optional(),
       currency: z.string().optional(),
       initialBalance: z.number().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input
+      if (Object.keys(data).length === 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'No fields to update' })
+      }
       const [updated] = await ctx.db.update(accounts).set(data).where(eq(accounts.id, id)).returning()
+      if (!updated) {
+        throw new TRPCError({ code: 'NOT_FOUND' })
+      }
       return updated
     }),
 })

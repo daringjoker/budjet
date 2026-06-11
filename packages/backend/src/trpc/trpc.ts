@@ -1,0 +1,9 @@
+import { initTRPC } from '@trpc/server'
+import type { Db } from '../db/index.js'
+
+export interface Context { db: Db }
+
+const t = initTRPC.context<Context>().create()
+export const router = t.router
+export const publicProcedure = t.procedure
+export const createCallerFactory = t.createCallerFactory

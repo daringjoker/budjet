@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { router, publicProcedure } from '../trpc.js'
-import { budgets, budgetAlerts, transactions, transactionCategories } from '@budjet/shared/schema'
+import { budgets, transactions, transactionCategories } from '@budjet/shared/schema'
 import { eq, and, gte, lte, inArray, sum } from 'drizzle-orm'
 import { TRPCError } from '@trpc/server'
 
@@ -46,8 +46,8 @@ export const budgetsRouter = router({
         periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
       } else if (budget.period === 'weekly') {
         const day = now.getDay()
-        periodStart = new Date(now.getTime() - day * 86_400_000)
-        periodEnd = new Date(periodStart.getTime() + 7 * 86_400_000)
+        periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day)
+        periodEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 7)
       }
 
       const txnIds = budget.categoryId
@@ -62,7 +62,21 @@ export const budgetsRouter = router({
         lte(transactions.date, periodEnd),
       ]
       if (budget.accountId) filters.push(eq(transactions.accountId, budget.accountId))
-      if (txnIds.length) filters.push(inArray(transactions.id, txnIds))
+      if (budget.categoryId !== null && budget.categoryId !== undefined) {
+        if (txnIds.length === 0) {
+          return {
+            budgetId: budget.id,
+            budgetName: budget.name,
+            budgetAmount: budget.amount,
+            spent: 0,
+            remaining: budget.amount,
+            percentUsed: 0,
+            periodStart,
+            periodEnd,
+          }
+        }
+        filters.push(inArray(transactions.id, txnIds))
+      }
 
       const [{ total }] = await ctx.db
         .select({ total: sum(transactions.amount) })

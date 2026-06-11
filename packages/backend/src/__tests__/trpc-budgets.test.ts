@@ -10,7 +10,7 @@ describe('budgets router', () => {
     const [acct] = await db.insert(accounts).values({ name: 'Cash', type: 'cash', currency: 'NPR', initialBalance: 0, createdAt: new Date() }).returning()
     const [cat] = await db.insert(categories).values({ name: 'Food', color: '#ef4444' }).returning()
 
-    await db.insert(transactions).values({ accountId: acct.id, date: new Date(), amount: 3000, type: 'debit', description: 'Groceries', currency: 'NPR', source: 'manual', createdAt: new Date() })
+    const [txn] = await db.insert(transactions).values({ accountId: acct.id, date: new Date(), amount: 3000, type: 'debit', description: 'Groceries', currency: 'NPR', source: 'manual', createdAt: new Date() }).returning()
 
     const budget = await caller.budgets.create({
       name: 'June Food Budget',
@@ -23,7 +23,12 @@ describe('budgets router', () => {
 
     expect(budget.id).toBeDefined()
 
-    await caller.categories.assignToTransaction({ transactionId: 1, categoryId: cat.id })
+    // Before assigning category: spent should be 0 (no categorized transactions)
+    const progressBefore = await caller.budgets.progress({ id: budget.id })
+    expect(progressBefore.spent).toBe(0)
+
+    // After assigning category: spent should be 3000
+    await caller.categories.assignToTransaction({ transactionId: txn.id, categoryId: cat.id })
     const progress = await caller.budgets.progress({ id: budget.id })
     expect(progress.budgetAmount).toBe(10000)
     expect(progress.spent).toBe(3000)

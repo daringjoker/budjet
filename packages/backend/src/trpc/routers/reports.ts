@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { router, publicProcedure } from '../trpc.js'
 import { transactions, transactionCategories, categories } from '@budjet/shared/schema'
-import { eq, and, gte, lte, sum, desc } from 'drizzle-orm'
+import { eq, and, gte, lte, sum, desc, sql } from 'drizzle-orm'
 
 export const reportsRouter = router({
   summary: publicProcedure
@@ -11,16 +11,30 @@ export const reportsRouter = router({
       accountId: z.number().optional(),
     }))
     .query(async ({ ctx, input }) => {
-      const filters = [
+      const baseFilters = [
         gte(transactions.date, new Date(input.from)),
         lte(transactions.date, new Date(input.to)),
       ]
-      if (input.accountId) filters.push(eq(transactions.accountId, input.accountId))
+      if (input.accountId) baseFilters.push(eq(transactions.accountId, input.accountId))
 
-      const allTxns = await ctx.db.select().from(transactions).where(and(...filters))
-      const totalIn = allTxns.filter(t => t.type === 'credit').reduce((a, t) => a + t.amount, 0)
-      const totalOut = allTxns.filter(t => t.type === 'debit').reduce((a, t) => a + t.amount, 0)
-      return { totalIn, totalOut, net: totalIn - totalOut, transactionCount: allTxns.length }
+      const [{ totalIn }] = await ctx.db
+        .select({ totalIn: sum(transactions.amount) })
+        .from(transactions)
+        .where(and(...baseFilters, eq(transactions.type, 'credit')))
+
+      const [{ totalOut }] = await ctx.db
+        .select({ totalOut: sum(transactions.amount) })
+        .from(transactions)
+        .where(and(...baseFilters, eq(transactions.type, 'debit')))
+
+      const [{ count }] = await ctx.db
+        .select({ count: sql`count(*)` })
+        .from(transactions)
+        .where(and(...baseFilters))
+
+      const tin = Number(totalIn ?? 0)
+      const tout = Number(totalOut ?? 0)
+      return { totalIn: tin, totalOut: tout, net: tin - tout, transactionCount: Number(count) }
     }),
 
   categoryBreakdown: publicProcedure

@@ -1,7 +1,8 @@
 import { z } from 'zod'
+import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../trpc.js'
 import { transactions } from '@budjet/shared/schema'
-import { eq, and, gte, lte, desc } from 'drizzle-orm'
+import { eq, and, gte, lte, lt, isNotNull, desc } from 'drizzle-orm'
 
 export const transactionsRouter = router({
   list: publicProcedure
@@ -19,6 +20,10 @@ export const transactionsRouter = router({
       if (input?.type) filters.push(eq(transactions.type, input.type))
       if (input?.from) filters.push(gte(transactions.date, new Date(input.from)))
       if (input?.to) filters.push(lte(transactions.date, new Date(input.to)))
+      if (input?.lowConfidenceOnly) {
+        filters.push(lt(transactions.llmConfidence, 0.85))
+        filters.push(isNotNull(transactions.llmConfidence))
+      }
       return ctx.db.select().from(transactions)
         .where(filters.length ? and(...filters) : undefined)
         .orderBy(desc(transactions.date))
@@ -55,7 +60,13 @@ export const transactionsRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input
+      if (Object.keys(data).length === 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'No fields to update' })
+      }
       const [updated] = await ctx.db.update(transactions).set(data).where(eq(transactions.id, id)).returning()
+      if (!updated) {
+        throw new TRPCError({ code: 'NOT_FOUND' })
+      }
       return updated
     }),
 
@@ -69,7 +80,13 @@ export const transactionsRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input
+      if (Object.keys(data).length === 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'No fields to update' })
+      }
       const [updated] = await ctx.db.update(transactions).set(data).where(eq(transactions.id, id)).returning()
+      if (!updated) {
+        throw new TRPCError({ code: 'NOT_FOUND' })
+      }
       return updated
     }),
 })

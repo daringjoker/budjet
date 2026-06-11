@@ -50,4 +50,24 @@ describe('transactions router', () => {
     expect(updated[0].description).toBe('Netflix')
     expect(updated[0].llmConfidence).toBeNull()
   })
+
+  it('update changes amount and description', async () => {
+    const db = createDb(':memory:')
+    const acct = await seedAccount(db)
+    const caller = createCaller({ db })
+
+    const txn = await caller.transactions.create({
+      accountId: acct.id,
+      date: new Date().toISOString(),
+      amount: 200,
+      type: 'debit',
+      description: 'Snacks',
+      currency: 'NPR',
+      source: 'manual',
+    })
+
+    const updated = await caller.transactions.update({ id: txn.id, amount: 250, description: 'Lunch' })
+    expect(updated.amount).toBe(250)
+    expect(updated.description).toBe('Lunch')
+  })
 })

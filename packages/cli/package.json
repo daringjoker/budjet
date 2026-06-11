@@ -1,0 +1,20 @@
+{
+  "name": "@budjet/cli",
+  "version": "0.0.1",
+  "type": "module",
+  "bin": { "budjet": "./src/index.ts" },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@budjet/backend": "workspace:*",
+    "@trpc/client": "^11.0.0",
+    "commander": "^12.0.0",
+    "chalk": "^5.3.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}

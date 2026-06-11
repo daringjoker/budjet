@@ -2,7 +2,8 @@ node_modules/
 dist/
 .env
 data/
-models/
+models/*.gguf
+.env*.local
 *.db
 *.db-shm
 *.db-wal

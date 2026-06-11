@@ -4,8 +4,6 @@ import type { Db } from '../db/index.js'
 
 export async function runNightlyForecast(db: Db, lookbackDays: number) {
   const now = new Date()
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
 
   // 1. Mark missed predicted transactions
   const pendingPast = await db.select().from(predictedTransactions)
@@ -16,7 +14,7 @@ export async function runNightlyForecast(db: Db, lookbackDays: number) {
 
   // 2. Generate recurring predicted entries for next 30 days
   const activeRecurring = await db.select().from(recurringTransactions).where(eq(recurringTransactions.status, 'active'))
-  const horizon = new Date(now.getTime() + 30 * 86_400_000)
+  const horizon = new Date(now.getTime() + lookbackDays * 86_400_000)
 
   for (const r of activeRecurring) {
     let next = r.nextDueDate
@@ -50,12 +48,14 @@ export async function runNightlyForecast(db: Db, lookbackDays: number) {
   // 3. Check budget alerts
   const allBudgets = await db.select().from(budgets)
   for (const budget of allBudgets) {
+    const { windowStart, windowEnd } = getBudgetWindow(budget, now)
+
     const [{ spent }] = await db.select({ spent: sum(transactions.amount) })
       .from(transactions)
       .where(and(
         eq(transactions.type, 'debit'),
-        gte(transactions.date, monthStart),
-        lte(transactions.date, monthEnd),
+        gte(transactions.date, windowStart),
+        lte(transactions.date, windowEnd),
         budget.accountId ? eq(transactions.accountId, budget.accountId) : undefined,
       ))
     const spentNum = Number(spent ?? 0)
@@ -64,7 +64,7 @@ export async function runNightlyForecast(db: Db, lookbackDays: number) {
     const alerts = await db.select().from(budgetAlerts).where(eq(budgetAlerts.budgetId, budget.id))
     for (const alert of alerts) {
       if (pct >= alert.threshold) {
-        const alreadyFired = alert.notifiedAt && alert.notifiedAt > monthStart
+        const alreadyFired = alert.notifiedAt && alert.notifiedAt > windowStart
         if (!alreadyFired) {
           console.warn(`[BUDGET ALERT] "${budget.name}" is at ${Math.round(pct * 100)}% (threshold: ${alert.threshold * 100}%)`)
           await db.update(budgetAlerts).set({ notifiedAt: now }).where(eq(budgetAlerts.id, alert.id))
@@ -83,6 +83,34 @@ function advanceByFrequency(date: Date, frequency: string): Date {
     case 'monthly': d.setMonth(d.getMonth() + 1); break
     case 'quarterly': d.setMonth(d.getMonth() + 3); break
     case 'yearly': d.setFullYear(d.getFullYear() + 1); break
+    default: throw new Error(`Unknown frequency: ${frequency}`)
   }
   return d
+}
+
+function getBudgetWindow(budget: { period: string; startDate: Date; endDate: Date | null }, now: Date): { windowStart: Date; windowEnd: Date } {
+  switch (budget.period) {
+    case 'monthly':
+      return {
+        windowStart: new Date(now.getFullYear(), now.getMonth(), 1),
+        windowEnd: new Date(now.getFullYear(), now.getMonth() + 1, 0),
+      }
+    case 'weekly': {
+      const day = now.getDay()
+      return {
+        windowStart: new Date(now.getFullYear(), now.getMonth(), now.getDate() - day),
+        windowEnd: new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 7),
+      }
+    }
+    case 'yearly':
+      return {
+        windowStart: new Date(now.getFullYear(), 0, 1),
+        windowEnd: new Date(now.getFullYear(), 11, 31),
+      }
+    default:
+      return {
+        windowStart: budget.startDate,
+        windowEnd: budget.endDate ?? now,
+      }
+  }
 }

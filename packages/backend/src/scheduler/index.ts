@@ -1,7 +1,9 @@
 export class Scheduler {
   private timers: NodeJS.Timeout[] = []
+  private stopped = false
 
   daily(hour: number, fn: () => Promise<void>) {
+    if (this.stopped) return
     const now = new Date()
     const next = new Date(now)
     next.setHours(hour, 0, 0, 0)
@@ -17,6 +19,7 @@ export class Scheduler {
   }
 
   stop() {
+    this.stopped = true
     this.timers.forEach(t => clearTimeout(t))
     this.timers = []
   }

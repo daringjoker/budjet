@@ -38,7 +38,7 @@ watcher.on('error', err => console.error('[IMAP]', err))
 await watcher.connect()
 console.log('[IMAP] Watching inbox via IDLE...')
 
-startTRPCServer(db, config.server.port)
+const server = startTRPCServer(db, config.server.port)
 
 const scheduler = new Scheduler()
 scheduler.daily(2, () => runNightlyForecast(db, config.budget.forecastLookbackDays))
@@ -46,6 +46,7 @@ console.log('[SCHEDULER] Nightly forecast scheduled at 02:00')
 
 process.on('SIGTERM', async () => {
   scheduler.stop()
+  server.close()
   await watcher.stop()
   await pool.shutdown()
   process.exit(0)

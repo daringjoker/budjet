@@ -2,6 +2,7 @@
 import { Command } from 'commander'
 import { createTRPCClient, httpBatchLink, type CreateTRPCClient } from '@trpc/client'
 import type { AppRouter } from '@budjet/backend/trpc'
+import chalk from 'chalk'
 import { registerAccountsCommands } from './commands/accounts.js'
 import { registerTransactionsCommands } from './commands/transactions.js'
 import { registerBudgetsCommands } from './commands/budgets.js'
@@ -28,5 +29,11 @@ registerRecurringCommands(program, trpc)
 registerAnticipateCommands(program, trpc)
 registerReviewCommands(program, trpc)
 registerReportCommands(program, trpc)
+
+process.on('unhandledRejection', (err) => {
+  const msg = err instanceof Error ? err.message : String(err)
+  console.error(chalk.red('Error: ' + msg))
+  process.exit(1)
+})
 
 program.parse()

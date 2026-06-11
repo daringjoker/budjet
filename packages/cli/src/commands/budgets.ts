@@ -10,6 +10,7 @@ export function registerBudgetsCommands(program: Command, trpc: TrpcClient) {
 
   cmd.command('list').action(async () => {
     const list = await trpc.budgets.list.query()
+    if (!list.length) { console.log('No budgets found.'); return }
     list.forEach(b => console.log(`  ID: ${b.id} | ${b.name} — ${b.amount} ${b.period}`))
   })
 
@@ -33,7 +34,8 @@ export function registerBudgetsCommands(program: Command, trpc: TrpcClient) {
 
   cmd.command('progress <id>').action(async (id) => {
     const p = await trpc.budgets.progress.query({ id: parseInt(id) })
-    const bar = '█'.repeat(Math.round(p.percentUsed / 5)) + '░'.repeat(20 - Math.round(p.percentUsed / 5))
+    const filled = Math.min(Math.round(p.percentUsed / 5), 20)
+    const bar = '█'.repeat(filled) + '░'.repeat(20 - filled)
     const color = p.percentUsed >= 100 ? chalk.red : p.percentUsed >= 80 ? chalk.yellow : chalk.green
     console.log(`\n${p.budgetName}`)
     console.log(`  ${color(bar)} ${p.percentUsed}%`)

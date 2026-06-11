@@ -16,19 +16,21 @@ export function registerReviewCommands(program: Command, trpc: TrpcClient) {
 
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
       console.log(chalk.bold(`\n${lowConf.length} transactions need review:\n`))
-
-      for (const t of lowConf) {
-        const dateStr = typeof t.date === 'string' ? t.date.slice(0, 10) : (t.date as Date).toISOString().slice(0, 10)
-        console.log(`  ID: ${t.id} | ${dateStr} | ${t.type} ${t.amount} ${t.currency}`)
-        console.log(`  Description: ${chalk.yellow(t.description)} (confidence: ${t.llmConfidence?.toFixed(2)})`)
-        const newDesc = await rl.question('  New description (Enter to keep): ')
-        if (newDesc.trim()) {
-          await trpc.transactions.review.mutate({ id: t.id, description: newDesc.trim(), llmConfidence: null })
-          console.log(chalk.green('  ✓ Updated\n'))
-        } else {
-          console.log('  Skipped\n')
+      try {
+        for (const t of lowConf) {
+          const dateStr = typeof t.date === 'string' ? t.date.slice(0, 10) : (t.date as Date).toISOString().slice(0, 10)
+          console.log(`  ID: ${t.id} | ${dateStr} | ${t.type} ${t.amount} ${t.currency}`)
+          console.log(`  Description: ${chalk.yellow(t.description)} (confidence: ${t.llmConfidence?.toFixed(2)})`)
+          const newDesc = await rl.question('  New description (Enter to keep): ')
+          if (newDesc.trim()) {
+            await trpc.transactions.review.mutate({ id: t.id, description: newDesc.trim(), llmConfidence: null })
+            console.log(chalk.green('  ✓ Updated\n'))
+          } else {
+            console.log('  Skipped\n')
+          }
         }
+      } finally {
+        rl.close()
       }
-      rl.close()
     })
 }

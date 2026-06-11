@@ -49,6 +49,10 @@ function resolvePeriod(period: string): { from: Date; to: Date } {
   }
   // YYYY-MM format
   const [y, m] = period.split('-').map(Number)
+  if (isNaN(y) || isNaN(m) || m < 1 || m > 12) {
+    console.error(chalk.red(`Invalid period format: "${period}". Use this-month, this-week, or YYYY-MM`))
+    process.exit(1)
+  }
   return {
     from: new Date(y, m - 1, 1),
     to: new Date(y, m, 0),

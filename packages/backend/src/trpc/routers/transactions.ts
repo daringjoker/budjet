@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../trpc.js'
 import { transactions } from '@budjet/shared/schema'
+import { DEFAULT_CONFIDENCE_THRESHOLD } from '@budjet/shared'
 import { eq, and, gte, lte, lt, isNotNull, desc } from 'drizzle-orm'
 
 export const transactionsRouter = router({
@@ -21,7 +22,7 @@ export const transactionsRouter = router({
       if (input?.from) filters.push(gte(transactions.date, new Date(input.from)))
       if (input?.to) filters.push(lte(transactions.date, new Date(input.to)))
       if (input?.lowConfidenceOnly) {
-        filters.push(lt(transactions.llmConfidence, 0.85))
+        filters.push(lt(transactions.llmConfidence, DEFAULT_CONFIDENCE_THRESHOLD))
         filters.push(isNotNull(transactions.llmConfidence))
       }
       return ctx.db.select().from(transactions)

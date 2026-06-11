@@ -82,7 +82,8 @@ export class Processor {
       if (parsed.confidence >= this.confidenceThreshold) {
         await detectRecurring(this.db, txn)
       }
-    } catch {
+    } catch (err) {
+      console.error('[PROCESSOR] Failed to process email', email.messageId, err)
       await this.db.update(rawEmails).set({ status: 'failed' }).where(eq(rawEmails.id, savedEmail.id))
     }
   }

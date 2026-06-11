@@ -1,0 +1,13 @@
+{
+  "banks": [
+    { "name": "Example Bank", "sender": "alerts@examplebank.com", "currency": "NPR" }
+  ],
+  "llm": {
+    "modelPath": "./models/Qwen2.5-3B-Instruct-Q4_K_M.gguf",
+    "confidenceThreshold": 0.85,
+    "workerThreads": 1
+  },
+  "budget": {
+    "forecastLookbackDays": 90
+  }
+}

@@ -9,10 +9,13 @@ export interface EmailEvent {
   receivedAt: Date
 }
 
+const MAX_RECONNECT_ATTEMPTS = 10
+
 export class ImapWatcher extends EventEmitter {
   private client: ImapFlow
   private reconnectDelay = 1000
   private stopped = false
+  private consecutiveFailures = 0
 
   constructor(
     private readonly cfg: { host: string; user: string; password: string; port: number },
@@ -31,6 +34,7 @@ export class ImapWatcher extends EventEmitter {
   async connect() {
     await this.client.connect()
     await this.client.mailboxOpen('INBOX')
+    this.consecutiveFailures = 0
 
     this.client.on('exists', async (data: { count: number; prevCount: number }) => {
       if (data.count > data.prevCount) {
@@ -47,6 +51,7 @@ export class ImapWatcher extends EventEmitter {
 
   private async fetchUnseen() {
     try {
+      let fetched = 0
       for await (const msg of this.client.fetch('1:*', {
         uid: true,
         envelope: true,
@@ -64,6 +69,10 @@ export class ImapWatcher extends EventEmitter {
           receivedAt: msg.envelope?.date ?? new Date(),
         }
         this.emit('email', event)
+        fetched++
+      }
+      if (fetched > 0) {
+        console.log(`[IMAP] Fetched ${fetched} unseen email(s)`)
       }
     } catch (err) {
       this.emit('error', err)
@@ -71,12 +80,19 @@ export class ImapWatcher extends EventEmitter {
   }
 
   private scheduleReconnect() {
+    if (this.consecutiveFailures >= MAX_RECONNECT_ATTEMPTS) {
+      this.emit('error', new Error(`IMAP unreachable after ${MAX_RECONNECT_ATTEMPTS} attempts`))
+      return
+    }
+    const attempt = this.consecutiveFailures + 1
+    console.log(`[IMAP] Reconnect attempt ${attempt}/${MAX_RECONNECT_ATTEMPTS} in ${this.reconnectDelay}ms`)
     setTimeout(async () => {
       try {
         this.reconnectDelay = Math.min(this.reconnectDelay * 2 + Math.random() * 1000, 60_000)
         await this.connect()
         this.reconnectDelay = 1000
       } catch {
+        this.consecutiveFailures++
         this.scheduleReconnect()
       }
     }, this.reconnectDelay)

@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { router, publicProcedure } from '../trpc.js'
 import { transactions, transactionCategories, categories } from '@budjet/shared/schema'
 import { eq, and, gte, lte, sum, desc, sql, inArray, or, lt, isNotNull } from 'drizzle-orm'
-import { DEFAULT_CONFIDENCE_THRESHOLD } from '@budjet/shared'
+import { DEFAULT_CONFIDENCE_THRESHOLD, currentBsMonth, addBsMonths, bsMonthWindow, bsMonthKey } from '@budjet/shared'
 
 export const reportsRouter = router({
   summary: publicProcedure
@@ -101,9 +101,42 @@ export const reportsRouter = router({
 
   // Per-month in/out totals for the last N months (inclusive of current)
   trend: publicProcedure
-    .input(z.object({ months: z.number().int().min(1).max(24).default(6) }).optional())
+    .input(z.object({
+      months: z.number().int().min(1).max(24).default(6),
+      calendar: z.enum(['ad', 'bs']).default('ad'),
+    }).optional())
     .query(async ({ ctx, input }) => {
       const months = input?.months ?? 6
+
+      if (input?.calendar === 'bs') {
+        // SQLite can't group by Bikram Sambat months — bucket in JS
+        const now = currentBsMonth()
+        const first = addBsMonths(now.year, now.month, -(months - 1))
+        const start = bsMonthWindow(first.year, first.month).start
+        const rows = await ctx.db
+          .select({ date: transactions.date, type: transactions.type, amount: transactions.amount })
+          .from(transactions)
+          .where(gte(transactions.date, start))
+
+        const buckets = new Map<string, { totalIn: number; totalOut: number }>()
+        for (let i = 0; i < months; i++) {
+          const ym = addBsMonths(first.year, first.month, i)
+          buckets.set(`${ym.year}-${String(ym.month).padStart(2, '0')}`, { totalIn: 0, totalOut: 0 })
+        }
+        for (const t of rows) {
+          const key = bsMonthKey(t.date)
+          const bucket = buckets.get(key)
+          if (!bucket) continue
+          if (t.type === 'credit') bucket.totalIn += t.amount
+          else bucket.totalOut += t.amount
+        }
+        return [...buckets.entries()].map(([month, b]) => ({
+          month,
+          totalIn: Math.round(b.totalIn * 100) / 100,
+          totalOut: Math.round(b.totalOut * 100) / 100,
+        }))
+      }
+
       const start = new Date()
       start.setMonth(start.getMonth() - (months - 1), 1)
       start.setHours(0, 0, 0, 0)

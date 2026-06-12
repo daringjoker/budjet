@@ -18,7 +18,8 @@ import {
   IconPlus,
   type IconProps,
 } from './icons.js'
-import { formatDate, formatSignedMoney } from '../lib/format.js'
+import { formatSignedMoney } from '../lib/format.js'
+import { useCalendar } from '../lib/calendar.js'
 
 /** Simple sparkle, used for the Insights nav entry. */
 function IconSparkle({ size = 17, ...props }: IconProps) {
@@ -67,6 +68,7 @@ interface PaletteEntry {
  */
 export default function CommandPalette() {
   const navigate = useNavigate()
+  const { fmtDate } = useCalendar()
   const toast = useToast()
 
   const [open, setOpen] = useState(false)
@@ -189,7 +191,7 @@ export default function CommandPalette() {
         render: (
           <>
             <span style={{ color: 'var(--text-dim)', fontSize: 12, whiteSpace: 'nowrap' }}>
-              {formatDate(new Date(t.date))}
+              {fmtDate(new Date(t.date))}
             </span>
             <span
               style={{

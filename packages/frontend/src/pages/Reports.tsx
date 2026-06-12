@@ -1,10 +1,13 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { trpc } from '../trpc.js'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import Skeleton from '../components/ui/Skeleton.js'
 import EmptyState from '../components/ui/EmptyState.js'
 import { formatMoney, formatPercent, formatSignedMoney } from '../lib/format.js'
+import { useCalendar, type CalendarKind } from '../lib/calendar.js'
+import { addBsMonths, bsMonthWindow, bsToAd, currentBsMonth, daysInBsMonth } from '@budjet/shared'
+import BsDatePicker from '../components/BsDatePicker.js'
 
 const TOOLTIP_STYLE = {
   background: '#1a2540',
@@ -13,12 +16,6 @@ const TOOLTIP_STYLE = {
 } as const
 
 const TOOLTIP_TEXT = { color: '#e6ebf4' } as const
-
-/** "2026-04" → "Apr" */
-function monthLabel(m: string): string {
-  const [y, mo] = m.split('-').map(Number)
-  return new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'short' })
-}
 
 /** Local "yyyy-mm-dd" (avoids UTC shift from toISOString) */
 function ymd(d: Date): string {
@@ -36,8 +33,40 @@ const PRESETS: Array<{ key: PresetKey; label: string }> = [
   { key: 'this-year', label: 'This year' },
 ]
 
-function presetRange(key: PresetKey): { from: string; to: string } {
+/** Last AD day of a BS month, as a local Date. */
+function bsMonthEnd(year: number, month: number): Date {
+  return bsToAd(year, month, daysInBsMonth(year, month))
+}
+
+function presetRange(key: PresetKey, calendar: CalendarKind): { from: string; to: string } {
   const now = new Date()
+  if (calendar === 'bs') {
+    const cur = currentBsMonth(now)
+    switch (key) {
+      case 'this-month':
+        return {
+          from: ymd(bsMonthWindow(cur.year, cur.month).start),
+          to: ymd(bsMonthEnd(cur.year, cur.month)),
+        }
+      case 'last-month': {
+        const prev = addBsMonths(cur.year, cur.month, -1)
+        return {
+          from: ymd(bsMonthWindow(prev.year, prev.month).start),
+          to: ymd(bsMonthEnd(prev.year, prev.month)),
+        }
+      }
+      case 'last-3-months': {
+        const first = addBsMonths(cur.year, cur.month, -2)
+        return {
+          from: ymd(bsMonthWindow(first.year, first.month).start),
+          to: ymd(bsMonthEnd(cur.year, cur.month)),
+        }
+      }
+      case 'this-year':
+        // Baishakh 1 of the current BS year → today
+        return { from: ymd(bsToAd(cur.year, 1, 1)), to: ymd(now) }
+    }
+  }
   const y = now.getFullYear()
   const m = now.getMonth()
   switch (key) {
@@ -90,7 +119,8 @@ function CategoryRow({
 
 export default function Reports() {
   const navigate = useNavigate()
-  const initial = presetRange('this-month')
+  const { calendar, fmtMonthKey } = useCalendar()
+  const initial = presetRange('this-month', calendar)
   const [preset, setPreset] = useState<PresetKey | null>('this-month')
   const [from, setFrom] = useState(initial.from)
   const [to, setTo] = useState(initial.to)
@@ -101,17 +131,24 @@ export default function Reports() {
   const summary = trpc.reports.summary.useQuery({ from: fromISO, to: toISO })
   const breakdown = trpc.reports.categoryBreakdown.useQuery({ from: fromISO, to: toISO })
   const merchants = trpc.reports.topMerchants.useQuery({ from: fromISO, to: toISO, limit: 10 })
-  const trend = trpc.reports.trend.useQuery({ months: 6 })
+  const trend = trpc.reports.trend.useQuery({ months: 6, calendar })
 
   const net = summary.data?.net ?? 0
   const totalSpend = breakdown.data?.reduce((acc, c) => acc + c.total, 0) ?? 0
 
   const applyPreset = (key: PresetKey) => {
-    const range = presetRange(key)
+    const range = presetRange(key, calendar)
     setPreset(key)
     setFrom(range.from)
     setTo(range.to)
   }
+
+  // Re-apply the active preset when the calendar toggle flips so the
+  // window matches the new calendar's month boundaries.
+  useEffect(() => {
+    if (preset) applyPreset(preset)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calendar])
 
   return (
     <div style={{ display: 'grid', gap: 20 }}>
@@ -130,37 +167,65 @@ export default function Reports() {
           ))}
         </div>
         <div className="spacer" />
-        <div className="field">
-          <label htmlFor="report-from">From</label>
-          <input
-            id="report-from"
-            type="date"
-            className="input"
-            value={from}
-            onChange={e => {
-              if (e.target.value) {
-                setFrom(e.target.value)
+        {calendar === 'bs' ? (
+          <>
+            <BsDatePicker
+              label="From"
+              value={from}
+              onChange={adYmd => {
+                setFrom(adYmd)
                 setPreset(null)
-              }
-            }}
-          />
-        </div>
-        <span style={{ color: 'var(--text-dim)', alignSelf: 'flex-end', paddingBottom: 8 }}>→</span>
-        <div className="field">
-          <label htmlFor="report-to">To</label>
-          <input
-            id="report-to"
-            type="date"
-            className="input"
-            value={to}
-            onChange={e => {
-              if (e.target.value) {
-                setTo(e.target.value)
+              }}
+            />
+            <span style={{ color: 'var(--text-dim)', alignSelf: 'flex-end', paddingBottom: 8 }}>
+              →
+            </span>
+            <BsDatePicker
+              label="To"
+              value={to}
+              onChange={adYmd => {
+                setTo(adYmd)
                 setPreset(null)
-              }
-            }}
-          />
-        </div>
+              }}
+            />
+          </>
+        ) : (
+          <>
+            <div className="field">
+              <label htmlFor="report-from">From</label>
+              <input
+                id="report-from"
+                type="date"
+                className="input"
+                value={from}
+                onChange={e => {
+                  if (e.target.value) {
+                    setFrom(e.target.value)
+                    setPreset(null)
+                  }
+                }}
+              />
+            </div>
+            <span style={{ color: 'var(--text-dim)', alignSelf: 'flex-end', paddingBottom: 8 }}>
+              →
+            </span>
+            <div className="field">
+              <label htmlFor="report-to">To</label>
+              <input
+                id="report-to"
+                type="date"
+                className="input"
+                value={to}
+                onChange={e => {
+                  if (e.target.value) {
+                    setTo(e.target.value)
+                    setPreset(null)
+                  }
+                }}
+              />
+            </div>
+          </>
+        )}
       </div>
 
       {/* ---------- Stat cards ---------- */}
@@ -391,7 +456,7 @@ export default function Reports() {
             <BarChart data={trend.data} barGap={4}>
               <XAxis
                 dataKey="month"
-                tickFormatter={monthLabel}
+                tickFormatter={fmtMonthKey}
                 tick={{ fill: '#8b96ab', fontSize: 12 }}
                 axisLine={{ stroke: '#243049' }}
                 tickLine={false}
@@ -404,7 +469,7 @@ export default function Reports() {
               />
               <Tooltip
                 formatter={(v) => formatMoney(Number(v))}
-                labelFormatter={(m) => monthLabel(String(m))}
+                labelFormatter={(m) => fmtMonthKey(String(m))}
                 contentStyle={TOOLTIP_STYLE}
                 itemStyle={TOOLTIP_TEXT}
                 labelStyle={TOOLTIP_TEXT}

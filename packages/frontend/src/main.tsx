@@ -5,6 +5,7 @@ import '@fontsource-variable/inter'
 import './index.css'
 import { trpc, trpcClient } from './trpc.js'
 import { ToastProvider } from './components/ui/Toast.js'
+import { CalendarProvider } from './lib/calendar.js'
 import App from './App.js'
 
 const queryClient = new QueryClient()
@@ -14,7 +15,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
-          <App />
+          <CalendarProvider>
+            <App />
+          </CalendarProvider>
         </ToastProvider>
       </QueryClientProvider>
     </trpc.Provider>

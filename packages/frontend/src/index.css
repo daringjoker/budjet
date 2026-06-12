@@ -917,3 +917,29 @@ h4 {
   font-size: 11px;
   color: var(--text-dim);
 }
+
+/* ---------- Calendar (AD / BS) toggle ---------- */
+.cal-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 2px;
+  background: var(--bg);
+}
+
+.cal-toggle button {
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.cal-toggle button.active {
+  background: var(--surface-2);
+  color: var(--text);
+}

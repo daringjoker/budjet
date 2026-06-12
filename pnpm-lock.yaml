@@ -100,6 +100,9 @@ importers:
       '@budjet/backend':
         specifier: workspace:*
         version: link:../backend
+      '@budjet/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.2.8
@@ -146,6 +149,9 @@ importers:
       drizzle-orm:
         specifier: ^0.38.0
         version: 0.38.4(@types/better-sqlite3@7.6.13)(@types/react@18.3.31)(better-sqlite3@12.10.0)(react@18.3.1)
+      nepali-date-converter:
+        specifier: ^3.4.0
+        version: 3.4.0
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.0
@@ -2006,6 +2012,10 @@ packages:
 
   napi-build-utils@2.0.0:
     resolution: {integrity: sha512-GEbrYkbfF7MoNaoh2iGG84Mnf/WZfB0GdGEsM8wz7Expx/LlWf5U8t9nvJKXSp3qr5IsEbK04cBGhol/KwOsWA==}
+
+  nepali-date-converter@3.4.0:
+    resolution: {integrity: sha512-hBojNXCQN69I533CnxNubl72uNx2Zcow9t2bOML3CxXv227s7NKA2kStUGO5xysg0SwsubTTxAO6tcg9IhS61w==}
+    engines: {node: '>=6.0.0'}
 
   node-abi@3.92.0:
     resolution: {integrity: sha512-KdHvFWZjEKDf0cakgFjebl371GPsISX2oZHcuyKqM7DtogIsHrqKeLTo8wBHxaXRAQlY2PsPlZmfo+9ZCxEREQ==}
@@ -4056,6 +4066,8 @@ snapshots:
   nanoid@5.1.11: {}
 
   napi-build-utils@2.0.0: {}
+
+  nepali-date-converter@3.4.0: {}
 
   node-abi@3.92.0:
     dependencies:

@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@budjet/backend": "workspace:*",
+    "@budjet/shared": "workspace:*",
     "@fontsource-variable/inter": "^5.2.8",
     "@tanstack/react-query": "^5.0.0",
     "@trpc/client": "^11.0.0",

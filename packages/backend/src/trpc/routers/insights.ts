@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { router, publicProcedure } from '../trpc.js'
 import { transactions, transactionCategories, categories } from '@budjet/shared/schema'
+import { bsMonthWindow, currentBsMonth, addBsMonths, adToBs, bsToAd, daysInBsMonth } from '@budjet/shared'
 import { eq, and, gte, lt, sum, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.js'
 
@@ -53,16 +54,40 @@ async function categorySpend(db: Db, w: Window): Promise<Map<number, { name: str
 export const insightsRouter = router({
   monthly: publicProcedure
     .input(z.object({
-      // "2026-06"; defaults to the current month
+      // "2026-06" (AD) or "2083-02" (BS); defaults to the current month
       month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+      calendar: z.enum(['ad', 'bs']).default('ad'),
     }).optional())
     .query(async ({ ctx, input }) => {
       const now = new Date()
-      const [y, m] = input?.month
-        ? input.month.split('-').map(Number)
-        : [now.getFullYear(), now.getMonth() + 1]
-      const cur = monthWindow(y, m - 1)
-      const prev = monthWindow(y, m - 2)
+      const calendar = input?.calendar ?? 'ad'
+
+      let y: number, m: number
+      let cur: Window
+      let prev: Window
+      // Day-of-period bookkeeping for the pace section
+      let dayOfPeriod: number
+      let daysInPeriod: number
+      let prevSamePointEnd: Date
+
+      if (calendar === 'bs') {
+        const fallback = currentBsMonth(now)
+        ;[y, m] = input?.month ? input.month.split('-').map(Number) : [fallback.year, fallback.month]
+        cur = bsMonthWindow(y, m)
+        const prevYm = addBsMonths(y, m, -1)
+        prev = bsMonthWindow(prevYm.year, prevYm.month)
+        dayOfPeriod = adToBs(now).date
+        daysInPeriod = daysInBsMonth(y, m)
+        const clamped = Math.min(dayOfPeriod, daysInBsMonth(prevYm.year, prevYm.month))
+        prevSamePointEnd = new Date(bsToAd(prevYm.year, prevYm.month, clamped).getTime() + 86_400_000)
+      } else {
+        ;[y, m] = input?.month ? input.month.split('-').map(Number) : [now.getFullYear(), now.getMonth() + 1]
+        cur = monthWindow(y, m - 1)
+        prev = monthWindow(y, m - 2)
+        dayOfPeriod = now.getDate()
+        daysInPeriod = new Date(y, m, 0).getDate()
+        prevSamePointEnd = new Date(prev.start.getFullYear(), prev.start.getMonth(), dayOfPeriod + 1)
+      }
       const isCurrentMonth = now >= cur.start && now < cur.end
 
       const [thisMonth, lastMonth, curCats, prevCats] = await Promise.all([
@@ -162,27 +187,25 @@ export const insightsRouter = router({
         .sort((a, b) => b.amount - a.amount)
         .slice(0, 5)
 
-      // Spending pace: compare to the same day-of-month last month and
-      // project the month-end total at the current daily rate
+      // Spending pace: compare to the same day-of-period last month and
+      // project the period-end total at the current daily rate
       let pace = null
       if (isCurrentMonth) {
-        const dayOfMonth = now.getDate()
-        const sameDayPrevEnd = new Date(prev.start.getFullYear(), prev.start.getMonth(), dayOfMonth + 1)
         const [prevToDate] = await ctx.db
           .select({ out: sql<number>`coalesce(sum(case when ${transactions.type} = 'debit' then ${transactions.amount} end), 0)` })
           .from(transactions)
-          .where(and(gte(transactions.date, prev.start), lt(transactions.date, sameDayPrevEnd)))
-        const daysInMonth = new Date(y, m, 0).getDate()
+          .where(and(gte(transactions.date, prev.start), lt(transactions.date, prevSamePointEnd)))
         pace = {
           spentSoFar: thisMonth.totalOut,
           lastMonthSamePoint: Number(prevToDate.out),
-          monthElapsedPct: Math.round((dayOfMonth / daysInMonth) * 100),
-          projectedOut: dayOfMonth > 0 ? Math.round((thisMonth.totalOut / dayOfMonth) * daysInMonth) : 0,
+          monthElapsedPct: Math.round((dayOfPeriod / daysInPeriod) * 100),
+          projectedOut: dayOfPeriod > 0 ? Math.round((thisMonth.totalOut / dayOfPeriod) * daysInPeriod) : 0,
         }
       }
 
       return {
         month: `${y}-${String(m).padStart(2, '0')}`,
+        calendar,
         isCurrentMonth,
         thisMonth,
         lastMonth,

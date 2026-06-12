@@ -8,7 +8,9 @@ import Skeleton from '../components/ui/Skeleton.js'
 import EmptyState from '../components/ui/EmptyState.js'
 import TagRuleModal from '../components/TagRuleModal.js'
 import { IconPlus } from '../components/icons.js'
-import { formatDate, formatSignedMoney } from '../lib/format.js'
+import BsDatePicker from '../components/BsDatePicker.js'
+import { formatSignedMoney } from '../lib/format.js'
+import { useCalendar } from '../lib/calendar.js'
 
 type TxType = 'debit' | 'credit'
 
@@ -349,6 +351,7 @@ function TransactionModal({ tx, accounts, categories, onClose, onCreateRule }: T
 export default function Transactions() {
   const [searchParams, setSearchParams] = useSearchParams()
   const toast = useToast()
+  const { calendar, fmtDate } = useCalendar()
 
   // ----- URL-driven filters -----
   const accountParam = searchParams.get('account') ?? ''
@@ -587,26 +590,43 @@ export default function Transactions() {
             <option value="credit">Credit</option>
           </select>
         </div>
-        <div className="field">
-          <label htmlFor="tx-filter-from">From</label>
-          <input
-            id="tx-filter-from"
-            type="date"
-            className="input"
-            value={fromParam}
-            onChange={e => setParam('from', e.target.value)}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="tx-filter-to">To</label>
-          <input
-            id="tx-filter-to"
-            type="date"
-            className="input"
-            value={toParam}
-            onChange={e => setParam('to', e.target.value)}
-          />
-        </div>
+        {calendar === 'bs' ? (
+          <>
+            <BsDatePicker
+              label="From"
+              value={fromParam}
+              onChange={adYmd => setParam('from', adYmd)}
+            />
+            <BsDatePicker
+              label="To"
+              value={toParam}
+              onChange={adYmd => setParam('to', adYmd)}
+            />
+          </>
+        ) : (
+          <>
+            <div className="field">
+              <label htmlFor="tx-filter-from">From</label>
+              <input
+                id="tx-filter-from"
+                type="date"
+                className="input"
+                value={fromParam}
+                onChange={e => setParam('from', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="tx-filter-to">To</label>
+              <input
+                id="tx-filter-to"
+                type="date"
+                className="input"
+                value={toParam}
+                onChange={e => setParam('to', e.target.value)}
+              />
+            </div>
+          </>
+        )}
         <label
           style={{
             display: 'flex',
@@ -778,7 +798,7 @@ export default function Transactions() {
               return (
                 <tr key={t.id}>
                   <td style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    {formatDate(new Date(t.date))}
+                    {fmtDate(new Date(t.date))}
                   </td>
                   <td style={{ maxWidth: 280 }}>
                     <div

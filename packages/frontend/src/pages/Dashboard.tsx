@@ -14,7 +14,9 @@ import {
 import Skeleton from '../components/ui/Skeleton.js'
 import EmptyState from '../components/ui/EmptyState.js'
 import { useToast } from '../components/ui/Toast.js'
-import { formatDate, formatMoney, formatPercent, formatSignedMoney } from '../lib/format.js'
+import { formatMoney, formatPercent, formatSignedMoney } from '../lib/format.js'
+import { useCalendar } from '../lib/calendar.js'
+import { addBsMonths, currentBsMonth } from '@budjet/shared'
 
 const TOOLTIP_STYLE = {
   background: '#1a2540',
@@ -24,14 +26,12 @@ const TOOLTIP_STYLE = {
 
 const TOOLTIP_TEXT = { color: '#e6ebf4' } as const
 
-/** "2026-04" → "Apr" */
-function monthLabel(m: string): string {
-  const [y, mo] = m.split('-').map(Number)
-  return new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'short' })
-}
-
 function monthKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function bsKey(ym: { year: number; month: number }): string {
+  return `${ym.year}-${String(ym.month).padStart(2, '0')}`
 }
 
 /** Local "yyyy-mm-dd" (avoids UTC shift from toISOString) */
@@ -106,12 +106,13 @@ const ROW_STYLE = {
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { calendar, fmtDate, fmtMonthKey } = useCalendar()
   const now = new Date()
   const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
   const to = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString()
 
   const summary = trpc.reports.summary.useQuery({ from, to })
-  const trend = trpc.reports.trend.useQuery({ months: 4 })
+  const trend = trpc.reports.trend.useQuery({ months: 4, calendar })
   const breakdown = trpc.reports.categoryBreakdown.useQuery({ from, to })
   const upcoming = trpc.predicted.list.useQuery({ status: 'pending' })
   const balances = trpc.accounts.balances.useQuery()
@@ -133,8 +134,13 @@ export default function Dashboard() {
   const net = summary.data?.net ?? 0
   const savingsRate = income > 0 ? (net / income) * 100 : null
 
-  const currKey = monthKey(now)
-  const prevKey = monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 1))
+  const bsNow = currentBsMonth(now)
+  const currKey =
+    calendar === 'bs' ? bsKey(bsNow) : monthKey(now)
+  const prevKey =
+    calendar === 'bs'
+      ? bsKey(addBsMonths(bsNow.year, bsNow.month, -1))
+      : monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 1))
   const prevMonth = trend.data?.find(t => t.month === prevKey)
   const currMonth = trend.data?.find(t => t.month === currKey)
   const prevNet = prevMonth ? prevMonth.totalIn - prevMonth.totalOut : undefined
@@ -269,7 +275,7 @@ export default function Dashboard() {
               <BarChart data={trend.data} barGap={4}>
                 <XAxis
                   dataKey="month"
-                  tickFormatter={monthLabel}
+                  tickFormatter={fmtMonthKey}
                   tick={{ fill: '#8b96ab', fontSize: 12 }}
                   axisLine={{ stroke: '#243049' }}
                   tickLine={false}
@@ -282,7 +288,7 @@ export default function Dashboard() {
                 />
                 <Tooltip
                   formatter={(v) => formatMoney(Number(v))}
-                  labelFormatter={(m) => monthLabel(String(m))}
+                  labelFormatter={(m) => fmtMonthKey(String(m))}
                   contentStyle={TOOLTIP_STYLE}
                   itemStyle={TOOLTIP_TEXT}
                   labelStyle={TOOLTIP_TEXT}
@@ -458,7 +464,7 @@ export default function Dashboard() {
                 }}
               >
                 <span style={{ color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
-                  {formatDate(new Date(p.predictedDate))}
+                  {fmtDate(new Date(p.predictedDate))}
                 </span>
                 <span
                   style={{
@@ -552,7 +558,7 @@ export default function Dashboard() {
                 }}
               >
                 <span style={{ color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
-                  {formatDate(new Date(t.date))}
+                  {fmtDate(new Date(t.date))}
                 </span>
                 <span
                   style={{

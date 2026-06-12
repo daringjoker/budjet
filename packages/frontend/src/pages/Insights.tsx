@@ -1,26 +1,37 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { trpc } from '../trpc.js'
 import Skeleton from '../components/ui/Skeleton.js'
 import EmptyState from '../components/ui/EmptyState.js'
 import { IconAlert } from '../components/icons.js'
-import { formatDate, formatMoney, formatPercent, formatSignedMoney } from '../lib/format.js'
+import { formatMoney, formatPercent, formatSignedMoney } from '../lib/format.js'
+import { useCalendar, type CalendarKind } from '../lib/calendar.js'
+import { addBsMonths, currentBsMonth, formatBsMonth } from '@budjet/shared'
 
-/** Current month as "YYYY-MM" */
-function currentMonthKey(): string {
+/** Current month as "YYYY-MM" in the given calendar */
+function currentMonthKey(calendar: CalendarKind): string {
+  if (calendar === 'bs') {
+    const { year, month } = currentBsMonth()
+    return `${year}-${String(month).padStart(2, '0')}`
+  }
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
 
-/** "2026-06" → "June 2026" */
-function monthTitle(m: string): string {
+/** "2026-06" → "June 2026" (AD) / "2083-02" → "Jestha 2083" (BS) */
+function monthTitle(m: string, calendar: CalendarKind): string {
   const [y, mo] = m.split('-').map(Number)
+  if (calendar === 'bs') return formatBsMonth(y, mo)
   return new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 }
 
-/** Shift "YYYY-MM" by n months */
-function shiftMonth(m: string, n: number): string {
+/** Shift "YYYY-MM" by n months in the given calendar */
+function shiftMonth(m: string, n: number, calendar: CalendarKind): string {
   const [y, mo] = m.split('-').map(Number)
+  if (calendar === 'bs') {
+    const r = addBsMonths(y, mo, n)
+    return `${r.year}-${String(r.month).padStart(2, '0')}`
+  }
   const d = new Date(y, mo - 1 + n, 1)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
@@ -75,9 +86,22 @@ const TXN_ROW_STYLE = {
 
 export default function Insights() {
   const navigate = useNavigate()
-  const nowKey = currentMonthKey()
-  const [month, setMonth] = useState(nowKey)
-  const insights = trpc.insights.monthly.useQuery({ month })
+  const { calendar, fmtDate } = useCalendar()
+  const nowKey = currentMonthKey(calendar)
+
+  // Month state is tagged with the calendar it belongs to so a toggle flip
+  // never sends a key from one calendar with the other's `calendar` param.
+  const [monthState, setMonthState] = useState(() => ({ cal: calendar, key: nowKey }))
+  const month = monthState.cal === calendar ? monthState.key : nowKey
+  const setMonth = (key: string) => setMonthState({ cal: calendar, key })
+
+  // Reset to the new calendar's current month when the toggle flips.
+  useEffect(() => {
+    setMonthState(s => (s.cal === calendar ? s : { cal: calendar, key: nowKey }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calendar])
+
+  const insights = trpc.insights.monthly.useQuery({ month, calendar })
 
   const atCurrent = month === nowKey
   const data = insights.data
@@ -115,19 +139,19 @@ export default function Insights() {
           type="button"
           className="btn btn-ghost btn-sm"
           aria-label="Previous month"
-          onClick={() => setMonth(m => shiftMonth(m, -1))}
+          onClick={() => setMonth(shiftMonth(month, -1, calendar))}
         >
           ‹
         </button>
         <span style={{ fontWeight: 700, fontSize: 15, minWidth: 120, textAlign: 'center' }}>
-          {monthTitle(month)}
+          {monthTitle(month, calendar)}
         </span>
         <button
           type="button"
           className="btn btn-ghost btn-sm"
           aria-label="Next month"
           disabled={atCurrent}
-          onClick={() => setMonth(m => shiftMonth(m, 1))}
+          onClick={() => setMonth(shiftMonth(month, 1, calendar))}
         >
           ›
         </button>
@@ -377,7 +401,7 @@ export default function Insights() {
                     }}
                   >
                     <span style={{ color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
-                      {formatDate(new Date(t.date))}
+                      {fmtDate(new Date(t.date))}
                     </span>
                     <span
                       style={{
@@ -435,7 +459,7 @@ export default function Insights() {
                     }}
                   >
                     <span style={{ color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
-                      {formatDate(new Date(t.date))}
+                      {fmtDate(new Date(t.date))}
                     </span>
                     <span
                       style={{

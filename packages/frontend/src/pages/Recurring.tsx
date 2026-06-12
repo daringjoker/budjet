@@ -5,9 +5,11 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.js'
 import Skeleton from '../components/ui/Skeleton.js'
 import EmptyState from '../components/ui/EmptyState.js'
 import { IconAlert } from '../components/icons.js'
-import { formatDate, formatMoney } from '../lib/format.js'
+import { formatMoney } from '../lib/format.js'
+import { useCalendar } from '../lib/calendar.js'
 
 export default function Recurring() {
+  const { fmtDate } = useCalendar()
   const recurring = trpc.recurring.list.useQuery()
   const utils = trpc.useUtils()
   const toast = useToast()
@@ -138,7 +140,7 @@ export default function Recurring() {
                     <div style={{ fontWeight: 600 }}>{r.name}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                       {formatMoney(r.amount, r.currency)} / {r.frequency} · next{' '}
-                      {formatDate(r.nextDueDate)}
+                      {fmtDate(r.nextDueDate)}
                     </div>
                   </div>
                   <span className="badge badge-success">ACTIVE</span>

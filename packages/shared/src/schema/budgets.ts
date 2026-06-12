@@ -9,6 +9,8 @@ export const budgets = sqliteTable('budgets', {
   accountId: integer('account_id').references(() => accounts.id),
   amount: real('amount').notNull(),
   period: text('period', { enum: ['monthly', 'weekly', 'yearly', 'custom'] }).notNull(),
+  // Which calendar the period tracks: Gregorian months/years or Bikram Sambat
+  calendar: text('calendar', { enum: ['ad', 'bs'] }).notNull().default('ad'),
   startDate: integer('start_date', { mode: 'timestamp' }).notNull(),
   endDate: integer('end_date', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),

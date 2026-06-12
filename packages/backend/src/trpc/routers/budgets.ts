@@ -1,10 +1,12 @@
 import { z } from 'zod'
 import { router, publicProcedure } from '../trpc.js'
 import { budgets, budgetAlerts, transactions, transactionCategories } from '@budjet/shared/schema'
-import { eq, and, gte, lte, inArray, sum } from 'drizzle-orm'
+import { eq, and, gte, lt, inArray, sum } from 'drizzle-orm'
 import { TRPCError } from '@trpc/server'
+import { getBudgetWindow } from '../../pipeline/budget-window.js'
 
 const periodEnum = z.enum(['monthly', 'weekly', 'yearly', 'custom'])
+const calendarEnum = z.enum(['ad', 'bs'])
 
 export const budgetsRouter = router({
   list: publicProcedure.query(({ ctx }) =>
@@ -18,6 +20,7 @@ export const budgetsRouter = router({
       accountId: z.number().optional(),
       amount: z.number().positive(),
       period: periodEnum,
+      calendar: calendarEnum.default('ad'),
       startDate: z.string().datetime(),
       endDate: z.string().datetime().optional(),
     }))
@@ -39,6 +42,7 @@ export const budgetsRouter = router({
       accountId: z.number().nullable().optional(),
       amount: z.number().positive().optional(),
       period: periodEnum.optional(),
+      calendar: calendarEnum.optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input
@@ -66,17 +70,7 @@ export const budgetsRouter = router({
       if (!budget) throw new TRPCError({ code: 'NOT_FOUND', message: 'Budget not found' })
 
       const now = new Date()
-      let periodStart = budget.startDate
-      let periodEnd = budget.endDate ?? now
-
-      if (budget.period === 'monthly') {
-        periodStart = new Date(now.getFullYear(), now.getMonth(), 1)
-        periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-      } else if (budget.period === 'weekly') {
-        const day = now.getDay()
-        periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day)
-        periodEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 7)
-      }
+      const { windowStart: periodStart, windowEnd: periodEnd } = getBudgetWindow(budget, now)
 
       const txnIds = budget.categoryId
         ? (await ctx.db.select({ id: transactionCategories.transactionId })
@@ -87,7 +81,7 @@ export const budgetsRouter = router({
       const filters = [
         eq(transactions.type, 'debit'),
         gte(transactions.date, periodStart),
-        lte(transactions.date, periodEnd),
+        lt(transactions.date, periodEnd), // half-open window
       ]
       if (budget.accountId) filters.push(eq(transactions.accountId, budget.accountId))
       if (budget.categoryId !== null && budget.categoryId !== undefined) {

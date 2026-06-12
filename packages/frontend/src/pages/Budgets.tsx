@@ -7,8 +7,10 @@ import Skeleton from '../components/ui/Skeleton.js'
 import EmptyState from '../components/ui/EmptyState.js'
 import { IconPlus } from '../components/icons.js'
 import { formatMoney, formatPercent } from '../lib/format.js'
+import { useCalendar } from '../lib/calendar.js'
 
 type Period = 'monthly' | 'weekly' | 'yearly' | 'custom'
+type BudgetCalendar = 'ad' | 'bs'
 
 /** Row shape from budgets.list (dates arrive serialized). */
 interface Budget {
@@ -18,7 +20,17 @@ interface Budget {
   accountId: number | null
   amount: number
   period: Period
+  calendar: BudgetCalendar
 }
+
+/** period+calendar packed into one select value, e.g. "monthly:bs" */
+const PERIOD_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'monthly:ad', label: 'Monthly (English)' },
+  { value: 'monthly:bs', label: 'Monthly (Nepali — BS)' },
+  { value: 'weekly:ad', label: 'Weekly' },
+  { value: 'yearly:ad', label: 'Yearly (English)' },
+  { value: 'yearly:bs', label: 'Yearly (Nepali — BS)' },
+]
 
 interface NamedItem {
   id: number
@@ -41,6 +53,7 @@ function BudgetCard({
   onEdit: (b: Budget) => void
 }) {
   const progress = trpc.budgets.progress.useQuery({ id: budget.id })
+  const { fmtDate } = useCalendar()
   const p = progress.data
   const pct = p?.percentUsed ?? 0
   const level = pct >= 100 ? 'danger' : pct >= 80 ? 'warning' : 'success'
@@ -49,6 +62,11 @@ function BudgetCard({
     categoryName && accountName
       ? `${categoryName} · ${accountName}`
       : categoryName ?? accountName ?? 'All spending'
+
+  // periodEnd is exclusive — show the last day inside the window
+  const window = p
+    ? `${fmtDate(new Date(p.periodStart))} – ${fmtDate(new Date(new Date(p.periodEnd).getTime() - 86_400_000))}`
+    : null
 
   return (
     <div className="card">
@@ -73,6 +91,7 @@ function BudgetCard({
         </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <span className="badge badge-muted">{budget.period}</span>
+          {budget.calendar === 'bs' && <span className="badge">BS</span>}
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => onEdit(budget)}>
             Edit
           </button>
@@ -90,7 +109,10 @@ function BudgetCard({
             <span style={{ color: `var(--${level})`, fontWeight: 600 }}>{formatPercent(pct)}</span>
             <span style={{ color: 'var(--text-muted)' }}>Limit {formatMoney(p.budgetAmount)}</span>
           </div>
-          <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-dim)' }}>{scope}</div>
+          <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-dim)' }}>
+            {scope}
+            {window ? ` · ${window}` : ''}
+          </div>
         </>
       ) : null}
     </div>
@@ -120,7 +142,7 @@ function BudgetModal({
   const [form, setForm] = useState(() => ({
     name: budget?.name ?? '',
     amount: budget ? String(budget.amount) : '',
-    period: (budget?.period ?? 'monthly') as Period,
+    periodCal: `${budget?.period ?? 'monthly'}:${budget?.calendar ?? 'ad'}`,
     categoryId: budget?.categoryId != null ? String(budget.categoryId) : '',
     accountId: budget?.accountId != null ? String(budget.accountId) : '',
   }))
@@ -168,12 +190,14 @@ function BudgetModal({
       toast.error('Amount must be greater than 0')
       return
     }
+    const [period, calendar] = form.periodCal.split(':') as [Period, BudgetCalendar]
     if (isEdit && budget) {
       update.mutate({
         id: budget.id,
         name,
         amount,
-        period: form.period,
+        period,
+        calendar,
         categoryId: form.categoryId ? Number(form.categoryId) : null,
         accountId: form.accountId ? Number(form.accountId) : null,
       })
@@ -182,7 +206,8 @@ function BudgetModal({
       create.mutate({
         name,
         amount,
-        period: form.period,
+        period,
+        calendar,
         startDate: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
         ...(form.categoryId ? { categoryId: Number(form.categoryId) } : {}),
         ...(form.accountId ? { accountId: Number(form.accountId) } : {}),
@@ -256,13 +281,17 @@ function BudgetModal({
               <select
                 id="budget-period"
                 className="select"
-                value={form.period}
-                onChange={e => set('period', e.target.value as Period)}
+                value={form.periodCal}
+                onChange={e => set('periodCal', e.target.value)}
               >
-                <option value="monthly">Monthly</option>
-                <option value="weekly">Weekly</option>
-                <option value="yearly">Yearly</option>
-                {budget?.period === 'custom' && <option value="custom">Custom</option>}
+                {PERIOD_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+                {budget?.period === 'custom' && (
+                  <option value={`custom:${budget.calendar}`}>Custom</option>
+                )}
               </select>
             </div>
           </div>

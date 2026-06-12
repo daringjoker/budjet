@@ -24,7 +24,12 @@ export function registerBudgetsCommands(program: Command, trpc: TrpcClient) {
         console.log(chalk.dim('No budgets yet — create one with `budjet budgets create`'))
         return
       }
-      const rows = list.map((b) => [chalk.dim(String(b.id)), b.name, money(b.amount), b.period])
+      const rows = list.map((b) => [
+        chalk.dim(String(b.id)),
+        b.name,
+        money(b.amount),
+        b.calendar === 'bs' ? `${b.period} ${chalk.cyan('(BS)')}` : b.period,
+      ])
       console.log()
       console.log(table([['ID', 'NAME', 'LIMIT', 'PERIOD'], ...rows], { rightAlign: [2] }))
     })
@@ -35,20 +40,23 @@ export function registerBudgetsCommands(program: Command, trpc: TrpcClient) {
     .requiredOption('--name <name>', 'Budget name')
     .requiredOption('--amount <amount>', 'Budget limit amount')
     .requiredOption('--period <period>', 'monthly|weekly|yearly|custom')
+    .option('--nepali', 'Track the period on the Nepali (Bikram Sambat) calendar')
     .option('--category <id>', 'Category ID')
     .option('--account <id>', 'Account ID')
     .action(async (opts) => {
       const amount = parseAmount(opts.amount, '--amount')
+      const calendar = opts.nepali ? ('bs' as const) : ('ad' as const)
       const created = await trpc.budgets.create.mutate({
         name: opts.name,
         amount,
         period: opts.period,
+        calendar,
         startDate: new Date().toISOString(),
         categoryId: opts.category ? parseId(opts.category, 'category ID') : undefined,
         accountId: opts.account ? parseId(opts.account, 'account ID') : undefined,
       })
       console.log(chalk.green(`✓ Budget created: ${chalk.bold(opts.name)}`))
-      console.log(chalk.dim(`  id ${created.id} · ${money(amount)} / ${opts.period}`))
+      console.log(chalk.dim(`  id ${created.id} · ${money(amount)} / ${opts.period}${calendar === 'bs' ? ' (BS)' : ''}`))
     })
 
   cmd

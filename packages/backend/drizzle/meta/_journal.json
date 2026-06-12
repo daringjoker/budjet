@@ -15,6 +15,13 @@
       "when": 1781234875912,
       "tag": "0001_woozy_zodiak",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1781258466688,
+      "tag": "0002_omniscient_puck",
+      "breakpoints": true
     }
   ]
 }

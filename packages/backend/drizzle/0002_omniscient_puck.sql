@@ -1,0 +1,1 @@
+ALTER TABLE `budgets` ADD `calendar` text DEFAULT 'ad' NOT NULL;

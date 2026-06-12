@@ -1,5 +1,6 @@
-import { and, eq, gte, lte, sum } from 'drizzle-orm'
+import { and, eq, gte, lt, lte, sum } from 'drizzle-orm'
 import { transactions, predictedTransactions, budgets, budgetAlerts, recurringTransactions } from '@budjet/shared/schema'
+import { getBudgetWindow } from '../pipeline/budget-window.js'
 import type { Db } from '../db/index.js'
 
 export async function runNightlyForecast(db: Db, lookbackDays: number): Promise<{ missed: number; predictions: number; alertsFired: number }> {
@@ -58,7 +59,7 @@ export async function runNightlyForecast(db: Db, lookbackDays: number): Promise<
       .where(and(
         eq(transactions.type, 'debit'),
         gte(transactions.date, windowStart),
-        lte(transactions.date, windowEnd),
+        lt(transactions.date, windowEnd),
         budget.accountId ? eq(transactions.accountId, budget.accountId) : undefined,
       ))
     const spentNum = Number(spent ?? 0)
@@ -94,29 +95,3 @@ function advanceByFrequency(date: Date, frequency: string): Date {
   return d
 }
 
-function getBudgetWindow(budget: { period: string; startDate: Date; endDate: Date | null }, now: Date): { windowStart: Date; windowEnd: Date } {
-  switch (budget.period) {
-    case 'monthly':
-      return {
-        windowStart: new Date(now.getFullYear(), now.getMonth(), 1),
-        windowEnd: new Date(now.getFullYear(), now.getMonth() + 1, 0),
-      }
-    case 'weekly': {
-      const day = now.getDay()
-      return {
-        windowStart: new Date(now.getFullYear(), now.getMonth(), now.getDate() - day),
-        windowEnd: new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 7),
-      }
-    }
-    case 'yearly':
-      return {
-        windowStart: new Date(now.getFullYear(), 0, 1),
-        windowEnd: new Date(now.getFullYear(), 11, 31),
-      }
-    default:
-      return {
-        windowStart: budget.startDate,
-        windowEnd: budget.endDate ?? now,
-      }
-  }
-}

@@ -7,6 +7,7 @@ import { recurringRouter } from './routers/recurring.js'
 import { predictedRouter } from './routers/predicted.js'
 import { reportsRouter } from './routers/reports.js'
 import { merchantsRouter } from './routers/merchants.js'
+import { insightsRouter } from './routers/insights.js'
 
 export const appRouter = router({
   accounts: accountsRouter,
@@ -17,6 +18,7 @@ export const appRouter = router({
   predicted: predictedRouter,
   reports: reportsRouter,
   merchants: merchantsRouter,
+  insights: insightsRouter,
 })
 
 export type AppRouter = typeof appRouter

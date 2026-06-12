@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { trpc } from '../trpc.js'
 import { useToast } from '../components/ui/Toast.js'
@@ -343,125 +343,12 @@ function TransactionModal({ tx, accounts, categories, onClose, onCreateRule }: T
 }
 
 /* ------------------------------------------------------------------ */
-/* Merchant rules card                                                 */
-/* ------------------------------------------------------------------ */
-
-interface MerchantRule {
-  id: number
-  pattern: string
-  merchant: string
-  categoryId: number | null
-}
-
-function MerchantRulesCard({
-  rules,
-  categories,
-}: {
-  rules: MerchantRule[]
-  categories: Array<{ id: number; name: string }>
-}) {
-  const toast = useToast()
-  const utils = trpc.useUtils()
-  const [ruleToDelete, setRuleToDelete] = useState<MerchantRule | null>(null)
-
-  const categoryName = useMemo(() => {
-    const map = new Map<number, string>()
-    categories.forEach(c => map.set(c.id, c.name))
-    return map
-  }, [categories])
-
-  const deleteRule = trpc.merchants.deleteRule.useMutation({
-    onSuccess: () => {
-      toast.success('Rule deleted')
-      utils.merchants.rules.invalidate()
-      setRuleToDelete(null)
-    },
-    onError: err => {
-      toast.error(err.message)
-      setRuleToDelete(null)
-    },
-  })
-
-  return (
-    <div className="card">
-      <h2 className="card-title">Rules</h2>
-      {rules.length ? (
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Pattern</th>
-                <th>Merchant</th>
-                <th>Category</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {rules.map(r => (
-                <tr key={r.id}>
-                  <td
-                    style={{
-                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                      fontSize: 12,
-                      color: 'var(--text-muted)',
-                    }}
-                  >
-                    {r.pattern}
-                  </td>
-                  <td>
-                    <span className="badge">{r.merchant}</span>
-                  </td>
-                  <td>
-                    {r.categoryId !== null && categoryName.has(r.categoryId) ? (
-                      categoryName.get(r.categoryId)
-                    ) : (
-                      <span style={{ color: 'var(--text-dim)' }}>automatic</span>
-                    )}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => setRuleToDelete(r)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <EmptyState
-          title="No rules yet"
-          hint="Tag a transaction to create your first rule"
-        />
-      )}
-
-      <ConfirmDialog
-        open={ruleToDelete !== null}
-        title="Delete rule?"
-        message="Existing tags stay; future transactions won't be tagged."
-        confirmLabel={deleteRule.isPending ? 'Deleting…' : 'Delete'}
-        danger
-        onConfirm={() => {
-          if (ruleToDelete && !deleteRule.isPending) deleteRule.mutate({ id: ruleToDelete.id })
-        }}
-        onCancel={() => {
-          if (!deleteRule.isPending) setRuleToDelete(null)
-        }}
-      />
-    </div>
-  )
-}
-
-/* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
 export default function Transactions() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const toast = useToast()
 
   // ----- URL-driven filters -----
   const accountParam = searchParams.get('account') ?? ''
@@ -471,6 +358,7 @@ export default function Transactions() {
   const fromParam = searchParams.get('from') ?? ''
   const toParam = searchParams.get('to') ?? ''
   const reviewOnly = searchParams.get('review') === '1'
+  const qParam = searchParams.get('q') ?? ''
 
   const setParam = (key: string, value: string) => {
     setSearchParams(
@@ -490,11 +378,36 @@ export default function Transactions() {
   const fromISO = fromParam ? new Date(fromParam).toISOString() : undefined
   const toISO = toParam ? new Date(`${toParam}T23:59:59.999Z`).toISOString() : undefined
 
+  // ----- Search box: live input, debounced 300ms into the `q` URL param -----
+  const [qInput, setQInput] = useState(qParam)
+  const lastQWritten = useRef(qParam)
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (qInput !== qParam) {
+        lastQWritten.current = qInput
+        setParam('q', qInput)
+      }
+    }, 300)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qInput])
+
+  // Sync the input when `q` changes externally (e.g. via the command palette).
+  useEffect(() => {
+    if (qParam !== lastQWritten.current) {
+      lastQWritten.current = qParam
+      setQInput(qParam)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qParam])
+
   // ----- Queries -----
   const transactions = trpc.transactions.list.useQuery({
     accountId,
     categoryId,
     merchant: merchantParam || undefined,
+    q: qParam.trim() || undefined,
     type: typeFilter,
     from: fromISO,
     to: toISO,
@@ -512,7 +425,6 @@ export default function Transactions() {
 
   const accounts = trpc.accounts.list.useQuery()
   const categories = trpc.categories.list.useQuery()
-  const rules = trpc.merchants.rules.useQuery()
 
   const accountName = useMemo(() => {
     const map = new Map<number, string>()
@@ -545,9 +457,11 @@ export default function Transactions() {
     })
   }
 
-  // reports.summary doesn't accept a merchant filter, so when one is active
-  // we compute the strip's four numbers client-side from the loaded list.
+  // reports.summary doesn't accept merchant/text filters, so when either is
+  // active we compute the strip's four numbers client-side from the loaded list.
   const merchantActive = merchantParam !== ''
+  const qActive = qParam.trim() !== ''
+  const clientSide = merchantActive || qActive
   const clientSummary = useMemo(() => {
     let totalIn = 0
     let totalOut = 0
@@ -563,14 +477,85 @@ export default function Transactions() {
     }
   }, [transactions.data])
 
-  const stripData = merchantActive ? clientSummary : summary.data
-  const stripLoading = merchantActive ? transactions.isLoading : summary.isLoading
+  const stripData = clientSide ? clientSummary : summary.data
+  const stripLoading = clientSide ? transactions.isLoading : summary.isLoading
   const net = stripData?.net ?? 0
+
+  // ----- CSV export of the currently loaded (filtered) rows -----
+  const exportCsv = useCallback(() => {
+    const rows = transactions.data ?? []
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const lines = ['id,date,account,type,amount,currency,description,remarks,merchant,category,source']
+    for (const t of rows) {
+      lines.push(
+        [
+          t.id,
+          ymd(new Date(t.date)),
+          accountName.get(t.accountId) ?? '',
+          t.type,
+          t.amount,
+          t.currency,
+          t.description,
+          t.remarks ?? '',
+          t.merchant ?? '',
+          t.categoryName ?? '',
+          t.source,
+        ]
+          .map(esc)
+          .join(',')
+      )
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `budjet-transactions-${ymd(new Date())}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success(`Exported ${rows.length} transactions`)
+  }, [transactions.data, accountName, toast])
+
+  // ----- ?new=1 → open the Add-transaction modal, then strip the param -----
+  const newParam = searchParams.get('new')
+  useEffect(() => {
+    if (newParam === '1') {
+      setModalTx(null)
+      setParam('new', '')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newParam])
+
+  // ----- ?export=1 → export the current filtered list once loaded, then strip -----
+  const exportParam = searchParams.get('export')
+  const exportedOnce = useRef(false)
+  useEffect(() => {
+    if (exportParam !== '1') {
+      exportedOnce.current = false
+      return
+    }
+    if (transactions.data && !exportedOnce.current) {
+      exportedOnce.current = true
+      exportCsv()
+      setParam('export', '')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportParam, transactions.data, exportCsv])
 
   return (
     <div style={{ display: 'grid', gap: 20 }}>
       {/* ---------- Filter toolbar ---------- */}
       <div className="toolbar" style={{ marginBottom: 0, alignItems: 'flex-end' }}>
+        <div className="field">
+          <label htmlFor="tx-filter-q">Search</label>
+          <input
+            id="tx-filter-q"
+            className="input"
+            placeholder="Search…"
+            style={{ width: 200 }}
+            value={qInput}
+            onChange={e => setQInput(e.target.value)}
+          />
+        </div>
         <div className="field">
           <label htmlFor="tx-filter-account">Account</label>
           <select
@@ -656,6 +641,14 @@ export default function Transactions() {
           Low-confidence only
         </label>
         <div className="spacer" />
+        <button
+          type="button"
+          className="btn btn-ghost"
+          disabled={!transactions.data}
+          onClick={exportCsv}
+        >
+          Export CSV
+        </button>
         <button type="button" className="btn btn-primary" onClick={() => setModalTx(null)}>
           <IconPlus size={15} /> Add transaction
         </button>
@@ -937,8 +930,6 @@ export default function Transactions() {
         )}
       </div>
 
-      {/* ---------- Merchant rules ---------- */}
-      <MerchantRulesCard rules={rules.data ?? []} categories={sortedCategories} />
 
       {/* ---------- Add / Edit modal ---------- */}
       {modalTx !== undefined && (

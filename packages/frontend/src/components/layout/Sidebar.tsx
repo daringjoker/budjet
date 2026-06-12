@@ -6,6 +6,8 @@ import {
   IconBudgets,
   IconRecurring,
   IconReports,
+  IconInsights,
+  IconRules,
 } from '../icons.js'
 
 const NAV = [
@@ -15,6 +17,8 @@ const NAV = [
   { to: '/budgets', label: 'Budgets', Icon: IconBudgets },
   { to: '/recurring', label: 'Recurring', Icon: IconRecurring },
   { to: '/reports', label: 'Reports', Icon: IconReports },
+  { to: '/insights', label: 'Insights', Icon: IconInsights },
+  { to: '/rules', label: 'Rules', Icon: IconRules },
 ]
 
 export default function Sidebar() {

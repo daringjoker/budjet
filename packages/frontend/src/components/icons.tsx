@@ -85,6 +85,18 @@ export function IconReports(props: IconProps) {
   )
 }
 
+/** Insights — sparkline with a spark */
+export function IconInsights(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 17l5-6 4 3 6-8" />
+      <path d="M18 3v4" />
+      <path d="M16 5h4" />
+      <path d="M3 21h18" />
+    </svg>
+  )
+}
+
 /** Plus */
 export function IconPlus(props: IconProps) {
   return (
@@ -97,6 +109,16 @@ export function IconPlus(props: IconProps) {
 
 /** Alert triangle */
 export function IconAlert(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M10.3 4.06 1.86 18.14A2 2 0 0 0 3.57 21h16.86a2 2 0 0 0 1.71-2.86L13.7 4.06a2 2 0 0 0-3.4 0Z" />
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+    </svg>
+  )
+}
+/** Rules */
+export function IconRules(props: IconProps) {
   return (
     <svg {...base(props)}>
       <path d="M10.3 4.06 1.86 18.14A2 2 0 0 0 3.57 21h16.86a2 2 0 0 0 1.71-2.86L13.7 4.06a2 2 0 0 0-3.4 0Z" />

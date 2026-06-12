@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../trpc.js'
 import { transactions, transactionCategories, categories } from '@budjet/shared/schema'
 import { DEFAULT_CONFIDENCE_THRESHOLD } from '@budjet/shared'
-import { eq, and, gte, lte, lt, isNotNull, desc, inArray } from 'drizzle-orm'
+import { eq, and, gte, lte, lt, isNotNull, desc, inArray, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.js'
 
 async function txnIdsForCategory(db: Db, categoryId: number): Promise<number[]> {
@@ -29,6 +29,7 @@ export const transactionsRouter = router({
       type: z.enum(['debit', 'credit']).optional(),
       categoryId: z.number().optional(),
       merchant: z.string().optional(),
+      q: z.string().optional(),
       from: z.string().datetime().optional(),
       to: z.string().datetime().optional(),
       lowConfidenceOnly: z.boolean().optional(),
@@ -39,6 +40,14 @@ export const transactionsRouter = router({
       if (input?.accountId) filters.push(eq(transactions.accountId, input.accountId))
       if (input?.type) filters.push(eq(transactions.type, input.type))
       if (input?.merchant) filters.push(eq(transactions.merchant, input.merchant))
+      if (input?.q && input.q.trim().length > 0) {
+        const pat = `%${input.q.trim().toLowerCase()}%`
+        filters.push(or(
+          sql`lower(${transactions.description}) LIKE ${pat}`,
+          sql`lower(coalesce(${transactions.remarks}, '')) LIKE ${pat}`,
+          sql`lower(coalesce(${transactions.merchant}, '')) LIKE ${pat}`,
+        )!)
+      }
       if (input?.from) filters.push(gte(transactions.date, new Date(input.from)))
       if (input?.to) filters.push(lte(transactions.date, new Date(input.to)))
       if (input?.lowConfidenceOnly) {

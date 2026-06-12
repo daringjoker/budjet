@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { router, publicProcedure } from '../trpc.js'
-import { budgets, transactions, transactionCategories } from '@budjet/shared/schema'
+import { budgets, budgetAlerts, transactions, transactionCategories } from '@budjet/shared/schema'
 import { eq, and, gte, lte, inArray, sum } from 'drizzle-orm'
 import { TRPCError } from '@trpc/server'
 
@@ -29,6 +29,34 @@ export const budgetsRouter = router({
         createdAt: new Date(),
       }).returning()
       return created
+    }),
+
+  update: publicProcedure
+    .input(z.object({
+      id: z.number(),
+      name: z.string().min(1).optional(),
+      categoryId: z.number().nullable().optional(),
+      accountId: z.number().nullable().optional(),
+      amount: z.number().positive().optional(),
+      period: periodEnum.optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...data } = input
+      if (Object.keys(data).length === 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'No fields to update' })
+      }
+      const [updated] = await ctx.db.update(budgets).set(data).where(eq(budgets.id, id)).returning()
+      if (!updated) throw new TRPCError({ code: 'NOT_FOUND' })
+      return updated
+    }),
+
+  delete: publicProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db.delete(budgetAlerts).where(eq(budgetAlerts.budgetId, input.id))
+      const [deleted] = await ctx.db.delete(budgets).where(eq(budgets.id, input.id)).returning()
+      if (!deleted) throw new TRPCError({ code: 'NOT_FOUND' })
+      return deleted
     }),
 
   progress: publicProcedure

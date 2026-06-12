@@ -60,4 +60,17 @@ export function registerAnticipateCommands(program: Command, trpc: TrpcClient) {
       console.log()
       console.log(table([['DATE', 'AMOUNT', 'SOURCE', 'DESCRIPTION'], ...rows], { rightAlign: [1] }))
     })
+
+  cmd
+    .command('forecast')
+    .description('Run the prediction forecast now (also runs nightly at 02:00)')
+    .action(async () => {
+      const res = await trpc.predicted.runForecast.mutate()
+      console.log(chalk.green('✓ Forecast complete'))
+      console.log(
+        chalk.dim(
+          `  ${res.predictions} new prediction(s) · ${res.missed} marked missed · ${res.alertsFired} budget alert(s) fired`,
+        ),
+      )
+    })
 }

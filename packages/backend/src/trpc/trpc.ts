@@ -1,7 +1,10 @@
 import { initTRPC } from '@trpc/server'
 import type { Db } from '../db/index.js'
 
-export interface Context { db: Db }
+export interface Context {
+  db: Db
+  forecastLookbackDays?: number
+}
 
 const t = initTRPC.context<Context>().create()
 export const router = t.router

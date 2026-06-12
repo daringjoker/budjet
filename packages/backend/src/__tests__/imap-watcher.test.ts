@@ -8,6 +8,7 @@ describe('ImapWatcher', () => {
       connect: vi.fn().mockResolvedValue(undefined),
       mailboxOpen: vi.fn().mockResolvedValue({ exists: 0 }),
       idle: vi.fn().mockResolvedValue(undefined),
+      search: vi.fn().mockResolvedValue([1]),
       fetch: vi.fn().mockImplementation(async function* () {
         yield {
           uid: 1,
@@ -55,6 +56,7 @@ describe('ImapWatcher', () => {
       connect: vi.fn().mockResolvedValue(undefined),
       mailboxOpen: vi.fn().mockResolvedValue({ exists: 5 }),
       idle: vi.fn().mockResolvedValue(undefined),
+      search: vi.fn().mockResolvedValue([]),
       fetch: vi.fn(),
       on: vi.fn().mockImplementation((event: string, handler: Function) => {
         if (event === 'exists') existsHandlers.push(handler)

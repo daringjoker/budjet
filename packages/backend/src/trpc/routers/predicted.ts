@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { router, publicProcedure } from '../trpc.js'
 import { predictedTransactions } from '@budjet/shared/schema'
 import { eq } from 'drizzle-orm'
+import { runNightlyForecast } from '../../scheduler/forecast.js'
 
 export const predictedRouter = router({
   list: publicProcedure
@@ -32,4 +33,9 @@ export const predictedRouter = router({
       }).returning()
       return created
     }),
+
+  // On-demand forecast: same logic as the nightly scheduled run
+  runForecast: publicProcedure.mutation(({ ctx }) =>
+    runNightlyForecast(ctx.db, ctx.forecastLookbackDays ?? 90)
+  ),
 })

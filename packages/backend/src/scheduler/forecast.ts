@@ -2,8 +2,10 @@ import { and, eq, gte, lte, sum } from 'drizzle-orm'
 import { transactions, predictedTransactions, budgets, budgetAlerts, recurringTransactions } from '@budjet/shared/schema'
 import type { Db } from '../db/index.js'
 
-export async function runNightlyForecast(db: Db, lookbackDays: number) {
+export async function runNightlyForecast(db: Db, lookbackDays: number): Promise<{ missed: number; predictions: number; alertsFired: number }> {
   const now = new Date()
+  let predictionsCreated = 0
+  let alertsFired = 0
 
   // 1. Mark missed predicted transactions
   const pendingPast = await db.select().from(predictedTransactions)
@@ -40,6 +42,7 @@ export async function runNightlyForecast(db: Db, lookbackDays: number) {
           status: 'pending',
           createdAt: now,
         })
+        predictionsCreated++
       }
       next = advanceByFrequency(next, r.frequency)
     }
@@ -68,10 +71,13 @@ export async function runNightlyForecast(db: Db, lookbackDays: number) {
         if (!alreadyFired) {
           console.warn(`[BUDGET ALERT] "${budget.name}" is at ${Math.round(pct * 100)}% (threshold: ${alert.threshold * 100}%)`)
           await db.update(budgetAlerts).set({ notifiedAt: now }).where(eq(budgetAlerts.id, alert.id))
+          alertsFired++
         }
       }
     }
   }
+
+  return { missed: pendingPast.length, predictions: predictionsCreated, alertsFired }
 }
 
 function advanceByFrequency(date: Date, frequency: string): Date {

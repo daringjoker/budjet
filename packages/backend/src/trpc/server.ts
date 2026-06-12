@@ -6,7 +6,7 @@ import { serve } from '@hono/node-server'
 import { appRouter } from './router.js'
 import type { Db } from '../db/index.js'
 
-export function startTRPCServer(db: Db, port: number): Server {
+export function startTRPCServer(db: Db, port: number, opts?: { forecastLookbackDays?: number }): Server {
   const app = new Hono()
 
   app.use('/trpc/*', cors({
@@ -15,7 +15,7 @@ export function startTRPCServer(db: Db, port: number): Server {
 
   app.use('/trpc/*', trpcServer({
     router: appRouter,
-    createContext: () => ({ db }),
+    createContext: () => ({ db, forecastLookbackDays: opts?.forecastLookbackDays }),
   }))
 
   app.get('/health', (c) => c.json({ ok: true }))

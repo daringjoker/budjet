@@ -67,4 +67,55 @@ export const reportsRouter = router({
 
       return rows.map(r => ({ ...r, total: Number(r.total ?? 0) }))
     }),
+
+  // Per-month in/out totals for the last N months (inclusive of current)
+  trend: publicProcedure
+    .input(z.object({ months: z.number().int().min(1).max(24).default(6) }).optional())
+    .query(async ({ ctx, input }) => {
+      const months = input?.months ?? 6
+      const start = new Date()
+      start.setMonth(start.getMonth() - (months - 1), 1)
+      start.setHours(0, 0, 0, 0)
+
+      const month = sql<string>`strftime('%Y-%m', ${transactions.date}, 'unixepoch')`
+      const rows = await ctx.db
+        .select({
+          month,
+          totalIn: sql<number>`coalesce(sum(case when ${transactions.type} = 'credit' then ${transactions.amount} end), 0)`,
+          totalOut: sql<number>`coalesce(sum(case when ${transactions.type} = 'debit' then ${transactions.amount} end), 0)`,
+        })
+        .from(transactions)
+        .where(gte(transactions.date, start))
+        .groupBy(month)
+        .orderBy(month)
+
+      return rows.map(r => ({ month: r.month, totalIn: Number(r.totalIn), totalOut: Number(r.totalOut) }))
+    }),
+
+  // Biggest debit destinations in the window, grouped by description
+  topMerchants: publicProcedure
+    .input(z.object({
+      from: z.string().datetime(),
+      to: z.string().datetime(),
+      limit: z.number().int().min(1).max(50).default(10),
+    }))
+    .query(async ({ ctx, input }) => {
+      const rows = await ctx.db
+        .select({
+          description: transactions.description,
+          total: sum(transactions.amount),
+          count: sql<number>`count(*)`,
+        })
+        .from(transactions)
+        .where(and(
+          gte(transactions.date, new Date(input.from)),
+          lte(transactions.date, new Date(input.to)),
+          eq(transactions.type, 'debit'),
+        ))
+        .groupBy(transactions.description)
+        .orderBy(desc(sum(transactions.amount)))
+        .limit(input.limit)
+
+      return rows.map(r => ({ description: r.description, total: Number(r.total ?? 0), count: Number(r.count) }))
+    }),
 })

@@ -19,7 +19,7 @@ export class ImapWatcher extends EventEmitter {
   private consecutiveFailures = 0
 
   constructor(
-    private readonly cfg: { host: string; user: string; password: string; port: number },
+    private readonly cfg: { host: string; user: string; password: string; port: number; senders?: string[] },
     clientOverride?: ImapFlow
   ) {
     super()
@@ -32,10 +32,19 @@ export class ImapWatcher extends EventEmitter {
     } as ImapFlowOptions)
   }
 
-  async connect() {
+  /**
+   * Connect and watch. When `catchUp` is given, first fetches every message
+   * from the listed senders since the given date (deduped downstream by
+   * message-id), so mail received while the app was down is never missed.
+   */
+  async connect(catchUp?: { since: Date; senders: string[] }) {
     await this.client.connect()
     await this.client.mailboxOpen('INBOX')
     this.consecutiveFailures = 0
+
+    if (catchUp) {
+      await this.fetchSince(catchUp.since, catchUp.senders)
+    }
 
     this.client.on('exists', async (data: { count: number; prevCount: number }) => {
       if (data.count > data.prevCount) {
@@ -47,30 +56,72 @@ export class ImapWatcher extends EventEmitter {
       if (!this.stopped) this.scheduleReconnect()
     })
 
-    await this.client.idle()
+    // Start IDLE without blocking — idle() only resolves when the IDLE
+    // session ends, and ImapFlow re-enters idle automatically after commands.
+    void this.client.idle().catch((err: Error) => {
+      if (!this.stopped) this.emit('error', err)
+    })
+  }
+
+  private async fetchSince(since: Date, senders: string[]) {
+    try {
+      let fetched = 0
+      for (const sender of senders) {
+        const uids = await this.client.search({ from: sender, since }, { uid: true })
+        const uidList = Array.isArray(uids) ? uids : []
+        if (uidList.length === 0) continue
+        for await (const msg of this.client.fetch(
+          uidList.join(','),
+          { uid: true, envelope: true, source: true },
+          { uid: true }
+        )) {
+          const bodyText = msg.source ? await extractEmailText(msg.source) : ''
+          this.emit('email', {
+            messageId: msg.envelope?.messageId ?? `uid-${msg.uid}`,
+            sender: msg.envelope?.from?.[0]?.address ?? sender,
+            subject: msg.envelope?.subject ?? '',
+            bodyText,
+            receivedAt: msg.envelope?.date ?? new Date(),
+          } satisfies EmailEvent)
+          fetched++
+        }
+      }
+      console.log(`[IMAP] Catch-up since ${since.toISOString().slice(0, 10)}: ${fetched} email(s) queued (duplicates are skipped downstream)`)
+    } catch (err) {
+      this.emit('error', err)
+    }
   }
 
   private async fetchUnseen() {
     try {
       let fetched = 0
-      for await (const msg of this.client.fetch('1:*', {
-        uid: true,
-        envelope: true,
-        source: true,
-        flags: true,
-      })) {
-        if (msg.flags?.has('\\Seen')) continue
-        // bodyParts TEXT is unreliable for multipart/HTML mail — parse the full source
-        const bodyText = msg.source ? await extractEmailText(msg.source) : ''
-        const event: EmailEvent = {
-          messageId: msg.envelope?.messageId ?? `${msg.uid}`,
-          sender: msg.envelope?.from?.[0]?.address ?? '',
-          subject: msg.envelope?.subject ?? '',
-          bodyText,
-          receivedAt: msg.envelope?.date ?? new Date(),
+      // Restrict to known senders when configured — fetching the whole unseen
+      // inbox is expensive and floods the pipeline with irrelevant mail.
+      const senders = this.cfg.senders?.length ? this.cfg.senders : [undefined]
+      for (const sender of senders) {
+        const uids = await this.client.search(
+          sender ? { seen: false, from: sender } : { seen: false },
+          { uid: true }
+        )
+        const uidList = Array.isArray(uids) ? uids : []
+        if (uidList.length === 0) continue
+        for await (const msg of this.client.fetch(
+          uidList.join(','),
+          { uid: true, envelope: true, source: true },
+          { uid: true }
+        )) {
+          // bodyParts TEXT is unreliable for multipart/HTML mail — parse the full source
+          const bodyText = msg.source ? await extractEmailText(msg.source) : ''
+          const event: EmailEvent = {
+            messageId: msg.envelope?.messageId ?? `${msg.uid}`,
+            sender: msg.envelope?.from?.[0]?.address ?? '',
+            subject: msg.envelope?.subject ?? '',
+            bodyText,
+            receivedAt: msg.envelope?.date ?? new Date(),
+          }
+          this.emit('email', event)
+          fetched++
         }
-        this.emit('email', event)
-        fetched++
       }
       if (fetched > 0) {
         console.log(`[IMAP] Fetched ${fetched} unseen email(s)`)

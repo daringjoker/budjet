@@ -8,7 +8,9 @@ import { Processor } from './pipeline/processor.js'
 import { startTRPCServer } from './trpc/server.js'
 import { Scheduler } from './scheduler/index.js'
 import { runNightlyForecast } from './scheduler/forecast.js'
-import { accounts } from '@budjet/shared/schema'
+import { ensureDefaultCategories } from './pipeline/categories.js'
+import { accounts, rawEmails } from '@budjet/shared/schema'
+import { sql } from 'drizzle-orm'
 
 process.on('unhandledRejection', (reason) => {
   console.error('[FATAL] Unhandled rejection:', reason)
@@ -34,12 +36,14 @@ async function main() {
     })
   )
 
+  await ensureDefaultCategories(db)
+
+  // On-demand pool: the model loads on the first job and unloads after idle
   const pool = new LLMPool({ workerCount: config.llm.workerThreads, modelPath: config.llm.modelPath })
-  await pool.init()
 
   const processor = new Processor(db, knownSenders, pool, config.llm.confidenceThreshold)
   const queue = new EmailQueue({ maxSize: 200 })
-  const watcher = new ImapWatcher(config.imap)
+  const watcher = new ImapWatcher({ ...config.imap, senders: config.banks.map(b => b.sender) })
 
   queue.consume(email => processor.process(email))
   queue.on('dropped', e => console.warn('[QUEUE] Dropped email:', e.messageId))
@@ -48,10 +52,21 @@ async function main() {
   watcher.on('email', email => queue.push(email))
   watcher.on('error', err => console.error('[IMAP]', err))
 
-  await watcher.connect()
+  // Catch up on anything received while the app was down (1-day overlap;
+  // duplicates are dropped by message-id downstream)
+  const [{ lastReceived }] = await db
+    .select({ lastReceived: sql<number | null>`max(received_at)` })
+    .from(rawEmails)
+  const since = lastReceived
+    ? new Date(lastReceived * 1000 - 86_400_000)
+    : new Date(Date.now() - 7 * 86_400_000)
+
+  await watcher.connect({ since, senders: config.banks.map(b => b.sender) })
   console.log('[IMAP] Watching inbox via IDLE...')
 
-  const server = startTRPCServer(db, config.server.port)
+  const server = startTRPCServer(db, config.server.port, {
+    forecastLookbackDays: config.budget.forecastLookbackDays,
+  })
 
   const scheduler = new Scheduler()
   scheduler.daily(2, () => runNightlyForecast(db, config.budget.forecastLookbackDays))

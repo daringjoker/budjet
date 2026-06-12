@@ -2,7 +2,7 @@ export class Scheduler {
   private timers: NodeJS.Timeout[] = []
   private stopped = false
 
-  daily(hour: number, fn: () => Promise<void>) {
+  daily(hour: number, fn: () => Promise<unknown>) {
     if (this.stopped) return
     const now = new Date()
     const next = new Date(now)

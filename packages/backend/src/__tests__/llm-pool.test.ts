@@ -23,6 +23,8 @@ describe('LLMPool', () => {
       type: 'classify',
       payload: { subject: 'Test', body: 'Test', bankName: 'Test Bank' },
     })
+    // run() awaits the lazy start before enqueueing
+    await new Promise(r => setTimeout(r, 0))
 
     // Simulate worker responding
     expect(mockWorker.postMessage).toHaveBeenCalledWith(expect.objectContaining({ jobId: 'job-1' }))
@@ -46,6 +48,7 @@ describe('LLMPool', () => {
     await pool.init()
 
     const resultPromise = pool.run({ jobId: 'job-2', type: 'parse', payload: { subject: 'S', body: 'B', bankName: 'B' } })
+    await new Promise(r => setTimeout(r, 0))
     messageHandler!({ jobId: 'job-2', result: null, error: 'LLM failed' })
 
     await expect(resultPromise).rejects.toThrow('LLM failed')

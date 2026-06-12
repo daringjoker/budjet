@@ -1,5 +1,5 @@
 import { trpc } from '../trpc.js'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   BarChart,
   Bar,
@@ -32,6 +32,13 @@ function monthLabel(m: string): string {
 
 function monthKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** Local "yyyy-mm-dd" (avoids UTC shift from toISOString) */
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`
 }
 
 /** % change of curr vs prev (denominator |prev|); null when not computable */
@@ -98,6 +105,7 @@ const ROW_STYLE = {
 } as const
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const now = new Date()
   const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
   const to = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString()
@@ -141,8 +149,15 @@ export default function Dashboard() {
   const topCategories = breakdown.data?.slice(0, 6) ?? []
   const othersTotal = breakdown.data?.slice(6).reduce((acc, c) => acc + c.total, 0) ?? 0
   const donutData = [
-    ...topCategories.map(c => ({ name: c.categoryName, value: c.total, color: c.categoryColor })),
-    ...(othersTotal > 0 ? [{ name: 'Others', value: othersTotal, color: '#5d6b85' }] : []),
+    ...topCategories.map(c => ({
+      id: c.categoryId as number | null,
+      name: c.categoryName,
+      value: c.total,
+      color: c.categoryColor,
+    })),
+    ...(othersTotal > 0
+      ? [{ id: null as number | null, name: 'Others', value: othersTotal, color: '#5d6b85' }]
+      : []),
   ]
 
   const upcomingRows = upcoming.data
@@ -337,7 +352,40 @@ export default function Dashboard() {
                 {donutData.map(d => (
                   <div
                     key={d.name}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}
+                    role={d.id !== null ? 'button' : undefined}
+                    tabIndex={d.id !== null ? 0 : undefined}
+                    title={d.id !== null ? `View ${d.name} transactions` : undefined}
+                    onClick={
+                      d.id !== null
+                        ? () =>
+                            navigate(
+                              `/transactions?category=${d.id}&from=${ymd(
+                                new Date(now.getFullYear(), now.getMonth(), 1)
+                              )}&to=${ymd(now)}`
+                            )
+                        : undefined
+                    }
+                    onKeyDown={
+                      d.id !== null
+                        ? e => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              navigate(
+                                `/transactions?category=${d.id}&from=${ymd(
+                                  new Date(now.getFullYear(), now.getMonth(), 1)
+                                )}&to=${ymd(now)}`
+                              )
+                            }
+                          }
+                        : undefined
+                    }
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: 13,
+                      cursor: d.id !== null ? 'pointer' : undefined,
+                    }}
                   >
                     <span
                       style={{

@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { trpc } from '../trpc.js'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import Skeleton from '../components/ui/Skeleton.js'
@@ -51,7 +52,44 @@ function presetRange(key: PresetKey): { from: string; to: string } {
   }
 }
 
+/** Clickable wrapper for a category breakdown row (subtle hover bg). */
+function CategoryRow({
+  onClick,
+  children,
+}: {
+  onClick: () => void
+  children: ReactNode
+}) {
+  const [hover, setHover] = useState(false)
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick()
+        }
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        cursor: 'pointer',
+        borderRadius: 8,
+        padding: '6px 8px',
+        margin: '-6px -8px',
+        background: hover ? 'rgba(109, 124, 255, 0.08)' : 'transparent',
+        transition: 'background 0.15s ease',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
 export default function Reports() {
+  const navigate = useNavigate()
   const initial = presetRange('this-month')
   const [preset, setPreset] = useState<PresetKey | null>('this-month')
   const [from, setFrom] = useState(initial.from)
@@ -190,7 +228,12 @@ export default function Reports() {
               {breakdown.data.map(c => {
                 const share = totalSpend > 0 ? (c.total / totalSpend) * 100 : 0
                 return (
-                  <div key={c.categoryId}>
+                  <CategoryRow
+                    key={c.categoryId}
+                    onClick={() =>
+                      navigate(`/transactions?category=${c.categoryId}&from=${from}&to=${to}`)
+                    }
+                  >
                     <div
                       style={{
                         display: 'flex',
@@ -220,6 +263,7 @@ export default function Reports() {
                       >
                         {formatPercent(share)}
                       </span>
+                      <span style={{ color: 'var(--text-dim)', flexShrink: 0 }}>→</span>
                     </div>
                     <div className="progress">
                       <div
@@ -227,7 +271,7 @@ export default function Reports() {
                         style={{ width: `${share}%`, backgroundColor: c.categoryColor }}
                       />
                     </div>
-                  </div>
+                  </CategoryRow>
                 )
               })}
             </div>

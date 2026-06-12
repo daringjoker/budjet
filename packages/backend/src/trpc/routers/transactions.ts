@@ -1,15 +1,33 @@
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../trpc.js'
-import { transactions } from '@budjet/shared/schema'
+import { transactions, transactionCategories, categories } from '@budjet/shared/schema'
 import { DEFAULT_CONFIDENCE_THRESHOLD } from '@budjet/shared'
-import { eq, and, gte, lte, lt, isNotNull, desc } from 'drizzle-orm'
+import { eq, and, gte, lte, lt, isNotNull, desc, inArray } from 'drizzle-orm'
+import type { Db } from '../../db/index.js'
+
+async function txnIdsForCategory(db: Db, categoryId: number): Promise<number[]> {
+  const rows = await db
+    .select({ id: transactionCategories.transactionId })
+    .from(transactionCategories)
+    .where(eq(transactionCategories.categoryId, categoryId))
+  return rows.map(r => r.id)
+}
+
+/** Replace a transaction's category assignment (single-category model). */
+async function setCategory(db: Db, transactionId: number, categoryId: number | null) {
+  await db.delete(transactionCategories).where(eq(transactionCategories.transactionId, transactionId))
+  if (categoryId !== null) {
+    await db.insert(transactionCategories).values({ transactionId, categoryId }).onConflictDoNothing()
+  }
+}
 
 export const transactionsRouter = router({
   list: publicProcedure
     .input(z.object({
       accountId: z.number().optional(),
       type: z.enum(['debit', 'credit']).optional(),
+      categoryId: z.number().optional(),
       from: z.string().datetime().optional(),
       to: z.string().datetime().optional(),
       lowConfidenceOnly: z.boolean().optional(),
@@ -25,10 +43,33 @@ export const transactionsRouter = router({
         filters.push(lt(transactions.llmConfidence, DEFAULT_CONFIDENCE_THRESHOLD))
         filters.push(isNotNull(transactions.llmConfidence))
       }
-      return ctx.db.select().from(transactions)
+      if (input?.categoryId) {
+        const ids = await txnIdsForCategory(ctx.db, input.categoryId)
+        if (ids.length === 0) return []
+        filters.push(inArray(transactions.id, ids))
+      }
+
+      const rows = await ctx.db
+        .select({
+          txn: transactions,
+          categoryId: transactionCategories.categoryId,
+          categoryName: categories.name,
+          categoryColor: categories.color,
+        })
+        .from(transactions)
+        .leftJoin(transactionCategories, eq(transactionCategories.transactionId, transactions.id))
+        .leftJoin(categories, eq(categories.id, transactionCategories.categoryId))
         .where(filters.length ? and(...filters) : undefined)
         .orderBy(desc(transactions.date))
         .limit(input?.limit ?? 100)
+
+      // A transaction holds at most one category in our model; the join is 1:0..1
+      return rows.map(r => ({
+        ...r.txn,
+        categoryId: r.categoryId,
+        categoryName: r.categoryName,
+        categoryColor: r.categoryColor,
+      }))
     }),
 
   create: publicProcedure
@@ -42,33 +83,61 @@ export const transactionsRouter = router({
       balanceAfter: z.number().optional(),
       source: z.enum(['email', 'manual']),
       llmConfidence: z.number().min(0).max(1).optional(),
+      categoryId: z.number().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      const { categoryId, ...data } = input
       const [created] = await ctx.db.insert(transactions).values({
-        ...input,
+        ...data,
         date: new Date(input.date),
         createdAt: new Date(),
       }).returning()
+      if (categoryId !== undefined) {
+        await setCategory(ctx.db, created.id, categoryId)
+      }
       return created
     }),
 
   update: publicProcedure
     .input(z.object({
       id: z.number(),
-      description: z.string().optional(),
+      accountId: z.number().optional(),
+      date: z.string().datetime().optional(),
+      description: z.string().min(1).optional(),
       type: z.enum(['debit', 'credit']).optional(),
       amount: z.number().positive().optional(),
+      categoryId: z.number().nullable().optional(), // null clears the category
     }))
     .mutation(async ({ ctx, input }) => {
-      const { id, ...data } = input
-      if (Object.keys(data).length === 0) {
+      const { id, categoryId, date, ...data } = input
+      const patch: Record<string, unknown> = { ...data }
+      if (date !== undefined) patch.date = new Date(date)
+      if (Object.keys(patch).length === 0 && categoryId === undefined) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'No fields to update' })
       }
-      const [updated] = await ctx.db.update(transactions).set(data).where(eq(transactions.id, id)).returning()
-      if (!updated) {
-        throw new TRPCError({ code: 'NOT_FOUND' })
+
+      let updated
+      if (Object.keys(patch).length > 0) {
+        ;[updated] = await ctx.db.update(transactions).set(patch).where(eq(transactions.id, id)).returning()
+        if (!updated) throw new TRPCError({ code: 'NOT_FOUND' })
+      } else {
+        ;[updated] = await ctx.db.select().from(transactions).where(eq(transactions.id, id))
+        if (!updated) throw new TRPCError({ code: 'NOT_FOUND' })
+      }
+
+      if (categoryId !== undefined) {
+        await setCategory(ctx.db, id, categoryId)
       }
       return updated
+    }),
+
+  delete: publicProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db.delete(transactionCategories).where(eq(transactionCategories.transactionId, input.id))
+      const [deleted] = await ctx.db.delete(transactions).where(eq(transactions.id, input.id)).returning()
+      if (!deleted) throw new TRPCError({ code: 'NOT_FOUND' })
+      return deleted
     }),
 
   review: publicProcedure

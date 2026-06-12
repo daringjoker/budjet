@@ -38,6 +38,20 @@ async function main() {
 
   await ensureDefaultCategories(db)
 
+  // A wallet for out-of-bank expenses; created once so manual cash
+  // transactions always have a home
+  const hasCash = dbAccounts.some(a => a.type === 'cash')
+  if (!hasCash) {
+    await db.insert(accounts).values({
+      name: 'Cash',
+      type: 'cash',
+      currency: 'NPR',
+      initialBalance: 0,
+      createdAt: new Date(),
+    })
+    console.log('[SEED] Created "Cash" account for manual expenses')
+  }
+
   // On-demand pool: the model loads on the first job and unloads after idle
   const pool = new LLMPool({ workerCount: config.llm.workerThreads, modelPath: config.llm.modelPath })
 

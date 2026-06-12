@@ -1,37 +1,439 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { trpc } from '../trpc.js'
 import { useToast } from '../components/ui/Toast.js'
 import Modal from '../components/ui/Modal.js'
+import ConfirmDialog from '../components/ui/ConfirmDialog.js'
 import Skeleton from '../components/ui/Skeleton.js'
 import EmptyState from '../components/ui/EmptyState.js'
-import { formatDate, formatPercent, formatSignedMoney } from '../lib/format.js'
+import { IconPlus } from '../components/icons.js'
+import { formatDate, formatSignedMoney } from '../lib/format.js'
 
-export default function Transactions() {
-  const [filters, setFilters] = useState({ lowConfidenceOnly: false, limit: 100 })
-  const transactions = trpc.transactions.list.useQuery(filters)
-  const utils = trpc.useUtils()
+type TxType = 'debit' | 'credit'
+
+/** Row shape used by the table + edit modal (subset of transactions.list output). */
+interface Tx {
+  id: number
+  accountId: number
+  date: string | Date
+  amount: number
+  type: TxType
+  description: string
+  source: string
+  llmConfidence: number | null
+  categoryId: number | null
+  categoryName: string | null
+  categoryColor: string | null
+}
+
+/** Local "yyyy-mm-dd" (avoids UTC shift from toISOString) */
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`
+}
+
+function isLowConfidence(t: Pick<Tx, 'llmConfidence'>): boolean {
+  return t.llmConfidence !== null && t.llmConfidence < 0.85
+}
+
+const COL_COUNT = 8
+
+/* ------------------------------------------------------------------ */
+/* Add / Edit modal                                                    */
+/* ------------------------------------------------------------------ */
+
+interface TransactionModalProps {
+  /** null = create mode, otherwise the row being edited */
+  tx: Tx | null
+  accounts: Array<{ id: number; name: string }>
+  categories: Array<{ id: number; name: string }>
+  onClose: () => void
+}
+
+function TransactionModal({ tx, accounts, categories, onClose }: TransactionModalProps) {
   const toast = useToast()
+  const utils = trpc.useUtils()
+  const isEdit = tx !== null
+  const wasLowConf = tx !== null && isLowConfidence(tx)
 
-  type Tx = NonNullable<typeof transactions.data>[number]
-  const [editing, setEditing] = useState<Tx | null>(null)
-  const [draft, setDraft] = useState('')
+  const [form, setForm] = useState(() => ({
+    date: tx ? ymd(new Date(tx.date)) : ymd(new Date()),
+    accountId: String(tx?.accountId ?? accounts[0]?.id ?? ''),
+    type: (tx?.type ?? 'debit') as TxType,
+    amount: tx ? String(tx.amount) : '',
+    description: tx?.description ?? '',
+    categoryId: tx?.categoryId != null ? String(tx.categoryId) : '',
+  }))
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const invalidate = () => {
+    utils.transactions.list.invalidate()
+    utils.reports.summary.invalidate()
+  }
 
   const review = trpc.transactions.review.useMutation({
+    onSettled: () => utils.transactions.list.invalidate(),
+  })
+
+  const create = trpc.transactions.create.useMutation({
     onSuccess: () => {
-      toast.success('Transaction updated')
-      utils.transactions.list.invalidate()
-      setEditing(null)
+      toast.success('Transaction added')
+      invalidate()
+      onClose()
     },
     onError: err => toast.error(err.message),
   })
 
-  const closeModal = () => {
-    if (!review.isPending) setEditing(null)
+  const update = trpc.transactions.update.useMutation({
+    onSuccess: () => {
+      // Editing a low-confidence row also clears its review flag.
+      if (wasLowConf && tx) review.mutate({ id: tx.id, llmConfidence: null })
+      toast.success('Transaction updated')
+      invalidate()
+      onClose()
+    },
+    onError: err => toast.error(err.message),
+  })
+
+  const del = trpc.transactions.delete.useMutation({
+    onSuccess: () => {
+      toast.success('Transaction deleted')
+      invalidate()
+      setConfirmDelete(false)
+      onClose()
+    },
+    onError: err => {
+      toast.error(err.message)
+      setConfirmDelete(false)
+    },
+  })
+
+  const pending = create.isPending || update.isPending
+  const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
+    setForm(v => ({ ...v, [key]: value }))
+
+  const handleSave = () => {
+    const description = form.description.trim()
+    const amount = parseFloat(form.amount)
+    const accountId = Number(form.accountId)
+    if (!description) {
+      toast.error('Description is required')
+      return
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Amount must be greater than 0')
+      return
+    }
+    if (!accountId) {
+      toast.error('Account is required')
+      return
+    }
+    const date = new Date(form.date).toISOString()
+    if (isEdit && tx) {
+      update.mutate({
+        id: tx.id,
+        accountId,
+        date,
+        description,
+        type: form.type,
+        amount,
+        categoryId: form.categoryId ? Number(form.categoryId) : null,
+      })
+    } else {
+      create.mutate({
+        accountId,
+        date,
+        amount,
+        type: form.type,
+        description,
+        source: 'manual',
+        ...(form.categoryId ? { categoryId: Number(form.categoryId) } : {}),
+      })
+    }
   }
 
   return (
-    <div>
-      <div className="toolbar">
+    <>
+      <Modal
+        open
+        title={isEdit ? 'Edit transaction' : 'Add transaction'}
+        onClose={() => {
+          if (!pending && !del.isPending) onClose()
+        }}
+        footer={
+          <>
+            {isEdit && (
+              <button
+                type="button"
+                className="btn btn-danger"
+                style={{ marginRight: 'auto' }}
+                disabled={pending || del.isPending}
+                onClick={() => setConfirmDelete(true)}
+              >
+                Delete
+              </button>
+            )}
+            <button type="button" className="btn btn-ghost" disabled={pending} onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={`btn btn-primary${pending ? ' is-loading' : ''}`}
+              disabled={pending}
+              onClick={handleSave}
+            >
+              Save
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: 'grid', gap: 14 }}>
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor="tx-date">Date</label>
+              <input
+                id="tx-date"
+                type="date"
+                className="input"
+                value={form.date}
+                onChange={e => {
+                  if (e.target.value) set('date', e.target.value)
+                }}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="tx-account">Account</label>
+              <select
+                id="tx-account"
+                className="select"
+                value={form.accountId}
+                onChange={e => set('accountId', e.target.value)}
+              >
+                {accounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="tx-type">Type</label>
+              <select
+                id="tx-type"
+                className="select"
+                value={form.type}
+                onChange={e => set('type', e.target.value as TxType)}
+              >
+                <option value="debit">Debit</option>
+                <option value="credit">Credit</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="tx-amount">Amount</label>
+              <input
+                id="tx-amount"
+                type="number"
+                step="any"
+                min="0"
+                className="input"
+                placeholder="0.00"
+                value={form.amount}
+                onChange={e => set('amount', e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="tx-description">Description</label>
+            <input
+              id="tx-description"
+              className="input"
+              placeholder="e.g. Groceries at Bhatbhateni"
+              value={form.description}
+              onChange={e => set('description', e.target.value)}
+              autoFocus={isEdit}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="tx-category">Category</label>
+            <select
+              id="tx-category"
+              className="select"
+              value={form.categoryId}
+              onChange={e => set('categoryId', e.target.value)}
+            >
+              <option value="">Uncategorized</option>
+              {categories.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </Modal>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete transaction?"
+        message={`"${tx?.description ?? ''}" will be permanently removed.`}
+        confirmLabel={del.isPending ? 'Deleting…' : 'Delete'}
+        danger
+        onConfirm={() => {
+          if (tx && !del.isPending) del.mutate({ id: tx.id })
+        }}
+        onCancel={() => {
+          if (!del.isPending) setConfirmDelete(false)
+        }}
+      />
+    </>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Page                                                                */
+/* ------------------------------------------------------------------ */
+
+export default function Transactions() {
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // ----- URL-driven filters -----
+  const accountParam = searchParams.get('account') ?? ''
+  const categoryParam = searchParams.get('category') ?? ''
+  const typeParam = searchParams.get('type') ?? ''
+  const fromParam = searchParams.get('from') ?? ''
+  const toParam = searchParams.get('to') ?? ''
+  const reviewOnly = searchParams.get('review') === '1'
+
+  const setParam = (key: string, value: string) => {
+    setSearchParams(
+      prev => {
+        const next = new URLSearchParams(prev)
+        if (value) next.set(key, value)
+        else next.delete(key)
+        return next
+      },
+      { replace: true }
+    )
+  }
+
+  const accountId = accountParam ? Number(accountParam) : undefined
+  const categoryId = categoryParam ? Number(categoryParam) : undefined
+  const typeFilter = typeParam === 'debit' || typeParam === 'credit' ? typeParam : undefined
+  const fromISO = fromParam ? new Date(fromParam).toISOString() : undefined
+  const toISO = toParam ? new Date(`${toParam}T23:59:59.999Z`).toISOString() : undefined
+
+  // ----- Queries -----
+  const transactions = trpc.transactions.list.useQuery({
+    accountId,
+    categoryId,
+    type: typeFilter,
+    from: fromISO,
+    to: toISO,
+    lowConfidenceOnly: reviewOnly || undefined,
+    limit: 100,
+  })
+
+  // Summary covers everything when no date filter is set.
+  const summary = trpc.reports.summary.useQuery({
+    from: fromISO ?? new Date('2000-01-01').toISOString(),
+    to: toISO ?? new Date(`${ymd(new Date())}T23:59:59.999Z`).toISOString(),
+    accountId,
+    categoryId,
+  })
+
+  const accounts = trpc.accounts.list.useQuery()
+  const categories = trpc.categories.list.useQuery()
+
+  const accountName = useMemo(() => {
+    const map = new Map<number, string>()
+    accounts.data?.forEach(a => map.set(a.id, a.name))
+    return map
+  }, [accounts.data])
+
+  const sortedCategories = useMemo(
+    () => [...(categories.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [categories.data]
+  )
+
+  const activeCategory = categoryId
+    ? sortedCategories.find(c => c.id === categoryId)
+    : undefined
+
+  // ----- Modal state: undefined = closed, null = create, Tx = edit -----
+  const [modalTx, setModalTx] = useState<Tx | null | undefined>(undefined)
+
+  const net = summary.data?.net ?? 0
+
+  return (
+    <div style={{ display: 'grid', gap: 20 }}>
+      {/* ---------- Filter toolbar ---------- */}
+      <div className="toolbar" style={{ marginBottom: 0, alignItems: 'flex-end' }}>
+        <div className="field">
+          <label htmlFor="tx-filter-account">Account</label>
+          <select
+            id="tx-filter-account"
+            className="select"
+            value={accountParam}
+            onChange={e => setParam('account', e.target.value)}
+          >
+            <option value="">All accounts</option>
+            {accounts.data?.map(a => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="tx-filter-category">Category</label>
+          <select
+            id="tx-filter-category"
+            className="select"
+            value={categoryParam}
+            onChange={e => setParam('category', e.target.value)}
+          >
+            <option value="">All categories</option>
+            {sortedCategories.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="tx-filter-type">Type</label>
+          <select
+            id="tx-filter-type"
+            className="select"
+            value={typeFilter ?? ''}
+            onChange={e => setParam('type', e.target.value)}
+          >
+            <option value="">All</option>
+            <option value="debit">Debit</option>
+            <option value="credit">Credit</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="tx-filter-from">From</label>
+          <input
+            id="tx-filter-from"
+            type="date"
+            className="input"
+            value={fromParam}
+            onChange={e => setParam('from', e.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="tx-filter-to">To</label>
+          <input
+            id="tx-filter-to"
+            type="date"
+            className="input"
+            value={toParam}
+            onChange={e => setParam('to', e.target.value)}
+          />
+        </div>
         <label
           style={{
             display: 'flex',
@@ -41,45 +443,146 @@ export default function Transactions() {
             color: 'var(--text-muted)',
             cursor: 'pointer',
             userSelect: 'none',
+            paddingBottom: 9,
           }}
         >
           <input
             type="checkbox"
-            checked={filters.lowConfidenceOnly}
-            onChange={e => setFilters(v => ({ ...v, lowConfidenceOnly: e.target.checked }))}
+            checked={reviewOnly}
+            onChange={e => setParam('review', e.target.checked ? '1' : '')}
           />
-          Show low-confidence only
+          Low-confidence only
         </label>
+        <div className="spacer" />
+        <button type="button" className="btn btn-primary" onClick={() => setModalTx(null)}>
+          <IconPlus size={15} /> Add transaction
+        </button>
       </div>
 
+      {/* ---------- Active-filter summary strip ---------- */}
+      <div>
+        {activeCategory && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 13,
+              fontWeight: 500,
+              marginBottom: 10,
+            }}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: activeCategory.color,
+                flexShrink: 0,
+              }}
+            />
+            <span>
+              Category: <strong>{activeCategory.name}</strong>
+            </span>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setParam('category', '')}
+            >
+              ✕ Clear
+            </button>
+          </div>
+        )}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 20,
+          }}
+        >
+          <div className="stat-card">
+            <div className="stat-label">Total in</div>
+            {summary.isLoading ? (
+              <Skeleton height={30} width="70%" />
+            ) : (
+              <div className="stat-value pos">
+                {formatSignedMoney(summary.data?.totalIn ?? 0)}
+              </div>
+            )}
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Total out</div>
+            {summary.isLoading ? (
+              <Skeleton height={30} width="70%" />
+            ) : (
+              <div className="stat-value neg">
+                {formatSignedMoney(-(summary.data?.totalOut ?? 0))}
+              </div>
+            )}
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Net</div>
+            {summary.isLoading ? (
+              <Skeleton height={30} width="70%" />
+            ) : (
+              <div className={`stat-value ${net >= 0 ? 'pos' : 'neg'}`}>
+                {formatSignedMoney(net)}
+              </div>
+            )}
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Count</div>
+            {summary.isLoading ? (
+              <Skeleton height={30} width="70%" />
+            ) : (
+              <div className="stat-value accent">
+                {(summary.data?.transactionCount ?? 0).toLocaleString()}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ---------- Table ---------- */}
       <div className="table-wrap">
         <table className="table">
           <thead>
             <tr>
               <th>Date</th>
               <th>Description</th>
+              <th>Category</th>
+              <th>Account</th>
               <th>Type</th>
+              <th>Source</th>
               <th className="num">Amount</th>
-              <th className="num">Confidence</th>
-              <th>Actions</th>
+              <th />
             </tr>
           </thead>
           <tbody>
             {transactions.isLoading &&
-              Array.from({ length: 6 }, (_, i) => (
+              Array.from({ length: 8 }, (_, i) => (
                 <tr key={i}>
-                  <td colSpan={6}>
+                  <td colSpan={COL_COUNT}>
                     <Skeleton height={14} />
                   </td>
                 </tr>
               ))}
             {transactions.data?.map(t => {
-              const lowConf = t.llmConfidence !== null && t.llmConfidence < 0.85
+              const lowConf = isLowConfidence(t)
               const signed = t.type === 'debit' ? -t.amount : t.amount
               return (
                 <tr key={t.id}>
-                  <td style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{formatDate(t.date)}</td>
-                  <td>
+                  <td style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                    {formatDate(new Date(t.date))}
+                  </td>
+                  <td
+                    style={{
+                      maxWidth: 280,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
                     {t.description}
                     {lowConf && (
                       <span className="badge badge-warning" style={{ marginLeft: 8 }}>
@@ -88,29 +591,71 @@ export default function Transactions() {
                     )}
                   </td>
                   <td>
-                    <span className={`badge ${t.type === 'debit' ? 'badge-danger' : 'badge-success'}`}>
+                    {t.categoryId !== null && t.categoryName ? (
+                      <button
+                        type="button"
+                        title={`Filter by ${t.categoryName}`}
+                        onClick={() => setParam('category', String(t.categoryId))}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          background: 'none',
+                          border: 'none',
+                          padding: 0,
+                          font: 'inherit',
+                          color: 'inherit',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            background: t.categoryColor ?? 'var(--text-dim)',
+                            flexShrink: 0,
+                          }}
+                        />
+                        {t.categoryName}
+                      </button>
+                    ) : (
+                      <span style={{ color: 'var(--text-dim)' }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+                    {accountName.get(t.accountId) ?? '—'}
+                  </td>
+                  <td>
+                    <span
+                      className={`badge ${t.type === 'debit' ? 'badge-danger' : 'badge-success'}`}
+                    >
                       {t.type}
                     </span>
                   </td>
+                  <td>
+                    {t.source === 'manual' ? (
+                      <span className="badge badge-muted">manual</span>
+                    ) : (
+                      <span style={{ color: 'var(--text-dim)' }}>{t.source}</span>
+                    )}
+                  </td>
                   <td
                     className="num"
-                    style={{ fontWeight: 600, color: signed < 0 ? 'var(--danger)' : 'var(--success)' }}
+                    style={{
+                      fontWeight: 600,
+                      color: signed < 0 ? 'var(--danger)' : 'var(--success)',
+                    }}
                   >
                     {formatSignedMoney(signed)}
                   </td>
-                  <td className="num" style={{ color: lowConf ? 'var(--warning)' : 'var(--text-dim)' }}>
-                    {t.llmConfidence != null ? formatPercent(t.llmConfidence * 100) : '—'}
-                  </td>
-                  <td>
+                  <td style={{ textAlign: 'right' }}>
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
-                      onClick={() => {
-                        setEditing(t)
-                        setDraft(t.description)
-                      }}
+                      onClick={() => setModalTx(t)}
                     >
-                      Fix
+                      Edit
                     </button>
                   </td>
                 </tr>
@@ -123,46 +668,21 @@ export default function Transactions() {
         )}
         {!transactions.isLoading && !transactions.isError && !transactions.data?.length && (
           <EmptyState
-            title="No transactions yet"
-            hint="Imported transactions will show up here"
+            title="No transactions match these filters"
+            hint="Try adjusting the filters above, or add one manually"
           />
         )}
       </div>
 
-      <Modal
-        open={editing !== null}
-        title="Fix transaction"
-        onClose={closeModal}
-        footer={
-          <>
-            <button type="button" className="btn btn-ghost" onClick={closeModal}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={`btn btn-primary${review.isPending ? ' is-loading' : ''}`}
-              disabled={review.isPending}
-              onClick={() => {
-                if (!editing) return
-                review.mutate({ id: editing.id, description: draft, llmConfidence: null })
-              }}
-            >
-              Save
-            </button>
-          </>
-        }
-      >
-        <div className="field">
-          <label htmlFor="fix-description">Description</label>
-          <input
-            id="fix-description"
-            className="input"
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            autoFocus
-          />
-        </div>
-      </Modal>
+      {/* ---------- Add / Edit modal ---------- */}
+      {modalTx !== undefined && (
+        <TransactionModal
+          tx={modalTx}
+          accounts={accounts.data ?? []}
+          categories={sortedCategories}
+          onClose={() => setModalTx(undefined)}
+        />
+      )}
     </div>
   )
 }

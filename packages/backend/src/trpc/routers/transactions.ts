@@ -28,6 +28,7 @@ export const transactionsRouter = router({
       accountId: z.number().optional(),
       type: z.enum(['debit', 'credit']).optional(),
       categoryId: z.number().optional(),
+      merchant: z.string().optional(),
       from: z.string().datetime().optional(),
       to: z.string().datetime().optional(),
       lowConfidenceOnly: z.boolean().optional(),
@@ -37,6 +38,7 @@ export const transactionsRouter = router({
       const filters = []
       if (input?.accountId) filters.push(eq(transactions.accountId, input.accountId))
       if (input?.type) filters.push(eq(transactions.type, input.type))
+      if (input?.merchant) filters.push(eq(transactions.merchant, input.merchant))
       if (input?.from) filters.push(gte(transactions.date, new Date(input.from)))
       if (input?.to) filters.push(lte(transactions.date, new Date(input.to)))
       if (input?.lowConfidenceOnly) {
@@ -79,6 +81,8 @@ export const transactionsRouter = router({
       amount: z.number().positive(),
       type: z.enum(['debit', 'credit']),
       description: z.string().min(1),
+      remarks: z.string().optional(),
+      merchant: z.string().optional(),
       currency: z.string().default('NPR'),
       balanceAfter: z.number().optional(),
       source: z.enum(['email', 'manual']),
@@ -104,6 +108,8 @@ export const transactionsRouter = router({
       accountId: z.number().optional(),
       date: z.string().datetime().optional(),
       description: z.string().min(1).optional(),
+      remarks: z.string().nullable().optional(),
+      merchant: z.string().nullable().optional(),
       type: z.enum(['debit', 'credit']).optional(),
       amount: z.number().positive().optional(),
       categoryId: z.number().nullable().optional(), // null clears the category

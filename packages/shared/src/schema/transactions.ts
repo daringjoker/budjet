@@ -11,6 +11,8 @@ export const transactions = sqliteTable('transactions', {
   amount: real('amount').notNull(),
   type: text('type', { enum: ['debit', 'credit'] }).notNull(),
   description: text('description').notNull(),
+  remarks: text('remarks'),
+  merchant: text('merchant'),
   currency: text('currency').notNull().default('NPR'),
   balanceAfter: real('balance_after'),
   source: text('source', { enum: ['email', 'manual'] }).notNull(),

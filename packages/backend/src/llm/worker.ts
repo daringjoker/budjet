@@ -11,7 +11,7 @@ let context: LlamaContext
 try {
   const llama = await getLlama()
   const model = await llama.loadModel({ modelPath })
-  context = await model.createContext({ contextSize: 2048 })
+  context = await model.createContext({ contextSize: 4096 })
 } catch (err) {
   parentPort?.postMessage({ type: 'init-error', error: String(err) })
   process.exit(1)

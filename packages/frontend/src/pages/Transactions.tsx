@@ -6,6 +6,7 @@ import Modal from '../components/ui/Modal.js'
 import ConfirmDialog from '../components/ui/ConfirmDialog.js'
 import Skeleton from '../components/ui/Skeleton.js'
 import EmptyState from '../components/ui/EmptyState.js'
+import TagRuleModal from '../components/TagRuleModal.js'
 import { IconPlus } from '../components/icons.js'
 import { formatDate, formatSignedMoney } from '../lib/format.js'
 
@@ -19,6 +20,8 @@ interface Tx {
   amount: number
   type: TxType
   description: string
+  remarks: string | null
+  merchant: string | null
   source: string
   llmConfidence: number | null
   categoryId: number | null
@@ -37,7 +40,7 @@ function isLowConfidence(t: Pick<Tx, 'llmConfidence'>): boolean {
   return t.llmConfidence !== null && t.llmConfidence < 0.85
 }
 
-const COL_COUNT = 8
+const COL_COUNT = 9
 
 /* ------------------------------------------------------------------ */
 /* Add / Edit modal                                                    */
@@ -49,9 +52,11 @@ interface TransactionModalProps {
   accounts: Array<{ id: number; name: string }>
   categories: Array<{ id: number; name: string }>
   onClose: () => void
+  /** Edit mode only: close this modal and open the tag-rule modal prefilled from the row */
+  onCreateRule: (tx: Tx) => void
 }
 
-function TransactionModal({ tx, accounts, categories, onClose }: TransactionModalProps) {
+function TransactionModal({ tx, accounts, categories, onClose, onCreateRule }: TransactionModalProps) {
   const toast = useToast()
   const utils = trpc.useUtils()
   const isEdit = tx !== null
@@ -63,6 +68,8 @@ function TransactionModal({ tx, accounts, categories, onClose }: TransactionModa
     type: (tx?.type ?? 'debit') as TxType,
     amount: tx ? String(tx.amount) : '',
     description: tx?.description ?? '',
+    remarks: tx?.remarks ?? '',
+    merchant: tx?.merchant ?? '',
     categoryId: tx?.categoryId != null ? String(tx.categoryId) : '',
   }))
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -139,6 +146,8 @@ function TransactionModal({ tx, accounts, categories, onClose }: TransactionModa
         type: form.type,
         amount,
         categoryId: form.categoryId ? Number(form.categoryId) : null,
+        remarks: form.remarks.trim() || null,
+        merchant: form.merchant.trim() || null,
       })
     } else {
       create.mutate({
@@ -270,6 +279,49 @@ function TransactionModal({ tx, accounts, categories, onClose }: TransactionModa
               ))}
             </select>
           </div>
+          {isEdit && (
+            <>
+              <div className="field">
+                <label htmlFor="tx-remarks">Remarks</label>
+                <textarea
+                  id="tx-remarks"
+                  className="input"
+                  rows={2}
+                  placeholder="Full bank remarks"
+                  value={form.remarks}
+                  onChange={e => set('remarks', e.target.value)}
+                  style={{
+                    color: 'var(--text-muted)',
+                    fontSize: 12,
+                    resize: 'vertical',
+                    background: 'var(--surface)',
+                  }}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="tx-merchant">Merchant</label>
+                <input
+                  id="tx-merchant"
+                  className="input"
+                  placeholder="e.g. Bhatbhateni"
+                  value={form.merchant}
+                  onChange={e => set('merchant', e.target.value)}
+                />
+              </div>
+              <div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={pending || del.isPending}
+                  onClick={() => {
+                    if (tx) onCreateRule(tx)
+                  }}
+                >
+                  Create rule from this…
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 
@@ -291,6 +343,120 @@ function TransactionModal({ tx, accounts, categories, onClose }: TransactionModa
 }
 
 /* ------------------------------------------------------------------ */
+/* Merchant rules card                                                 */
+/* ------------------------------------------------------------------ */
+
+interface MerchantRule {
+  id: number
+  pattern: string
+  merchant: string
+  categoryId: number | null
+}
+
+function MerchantRulesCard({
+  rules,
+  categories,
+}: {
+  rules: MerchantRule[]
+  categories: Array<{ id: number; name: string }>
+}) {
+  const toast = useToast()
+  const utils = trpc.useUtils()
+  const [ruleToDelete, setRuleToDelete] = useState<MerchantRule | null>(null)
+
+  const categoryName = useMemo(() => {
+    const map = new Map<number, string>()
+    categories.forEach(c => map.set(c.id, c.name))
+    return map
+  }, [categories])
+
+  const deleteRule = trpc.merchants.deleteRule.useMutation({
+    onSuccess: () => {
+      toast.success('Rule deleted')
+      utils.merchants.rules.invalidate()
+      setRuleToDelete(null)
+    },
+    onError: err => {
+      toast.error(err.message)
+      setRuleToDelete(null)
+    },
+  })
+
+  return (
+    <div className="card">
+      <h2 className="card-title">Rules</h2>
+      {rules.length ? (
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Pattern</th>
+                <th>Merchant</th>
+                <th>Category</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rules.map(r => (
+                <tr key={r.id}>
+                  <td
+                    style={{
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      fontSize: 12,
+                      color: 'var(--text-muted)',
+                    }}
+                  >
+                    {r.pattern}
+                  </td>
+                  <td>
+                    <span className="badge">{r.merchant}</span>
+                  </td>
+                  <td>
+                    {r.categoryId !== null && categoryName.has(r.categoryId) ? (
+                      categoryName.get(r.categoryId)
+                    ) : (
+                      <span style={{ color: 'var(--text-dim)' }}>automatic</span>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setRuleToDelete(r)}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyState
+          title="No rules yet"
+          hint="Tag a transaction to create your first rule"
+        />
+      )}
+
+      <ConfirmDialog
+        open={ruleToDelete !== null}
+        title="Delete rule?"
+        message="Existing tags stay; future transactions won't be tagged."
+        confirmLabel={deleteRule.isPending ? 'Deleting…' : 'Delete'}
+        danger
+        onConfirm={() => {
+          if (ruleToDelete && !deleteRule.isPending) deleteRule.mutate({ id: ruleToDelete.id })
+        }}
+        onCancel={() => {
+          if (!deleteRule.isPending) setRuleToDelete(null)
+        }}
+      />
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -300,6 +466,7 @@ export default function Transactions() {
   // ----- URL-driven filters -----
   const accountParam = searchParams.get('account') ?? ''
   const categoryParam = searchParams.get('category') ?? ''
+  const merchantParam = searchParams.get('merchant') ?? ''
   const typeParam = searchParams.get('type') ?? ''
   const fromParam = searchParams.get('from') ?? ''
   const toParam = searchParams.get('to') ?? ''
@@ -327,6 +494,7 @@ export default function Transactions() {
   const transactions = trpc.transactions.list.useQuery({
     accountId,
     categoryId,
+    merchant: merchantParam || undefined,
     type: typeFilter,
     from: fromISO,
     to: toISO,
@@ -344,6 +512,7 @@ export default function Transactions() {
 
   const accounts = trpc.accounts.list.useQuery()
   const categories = trpc.categories.list.useQuery()
+  const rules = trpc.merchants.rules.useQuery()
 
   const accountName = useMemo(() => {
     const map = new Map<number, string>()
@@ -363,7 +532,40 @@ export default function Transactions() {
   // ----- Modal state: undefined = closed, null = create, Tx = edit -----
   const [modalTx, setModalTx] = useState<Tx | null | undefined>(undefined)
 
-  const net = summary.data?.net ?? 0
+  // Tag-rule modal prefill (null = closed)
+  const [rulePrefill, setRulePrefill] = useState<{ pattern: string; merchant: string } | null>(
+    null
+  )
+
+  const openRuleModal = (tx: Tx) => {
+    setModalTx(undefined)
+    setRulePrefill({
+      pattern: tx.remarks?.trim() || tx.description,
+      merchant: tx.merchant ?? '',
+    })
+  }
+
+  // reports.summary doesn't accept a merchant filter, so when one is active
+  // we compute the strip's four numbers client-side from the loaded list.
+  const merchantActive = merchantParam !== ''
+  const clientSummary = useMemo(() => {
+    let totalIn = 0
+    let totalOut = 0
+    for (const t of transactions.data ?? []) {
+      if (t.type === 'credit') totalIn += t.amount
+      else totalOut += t.amount
+    }
+    return {
+      totalIn,
+      totalOut,
+      net: totalIn - totalOut,
+      transactionCount: transactions.data?.length ?? 0,
+    }
+  }, [transactions.data])
+
+  const stripData = merchantActive ? clientSummary : summary.data
+  const stripLoading = merchantActive ? transactions.isLoading : summary.isLoading
+  const net = stripData?.net ?? 0
 
   return (
     <div style={{ display: 'grid', gap: 20 }}>
@@ -493,6 +695,29 @@ export default function Transactions() {
             </button>
           </div>
         )}
+        {merchantActive && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 13,
+              fontWeight: 500,
+              marginBottom: 10,
+            }}
+          >
+            <span>
+              Merchant: <strong>{merchantParam}</strong>
+            </span>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setParam('merchant', '')}
+            >
+              ✕ Clear
+            </button>
+          </div>
+        )}
         <div
           style={{
             display: 'grid',
@@ -502,27 +727,27 @@ export default function Transactions() {
         >
           <div className="stat-card">
             <div className="stat-label">Total in</div>
-            {summary.isLoading ? (
+            {stripLoading ? (
               <Skeleton height={30} width="70%" />
             ) : (
               <div className="stat-value pos">
-                {formatSignedMoney(summary.data?.totalIn ?? 0)}
+                {formatSignedMoney(stripData?.totalIn ?? 0)}
               </div>
             )}
           </div>
           <div className="stat-card">
             <div className="stat-label">Total out</div>
-            {summary.isLoading ? (
+            {stripLoading ? (
               <Skeleton height={30} width="70%" />
             ) : (
               <div className="stat-value neg">
-                {formatSignedMoney(-(summary.data?.totalOut ?? 0))}
+                {formatSignedMoney(-(stripData?.totalOut ?? 0))}
               </div>
             )}
           </div>
           <div className="stat-card">
             <div className="stat-label">Net</div>
-            {summary.isLoading ? (
+            {stripLoading ? (
               <Skeleton height={30} width="70%" />
             ) : (
               <div className={`stat-value ${net >= 0 ? 'pos' : 'neg'}`}>
@@ -532,11 +757,11 @@ export default function Transactions() {
           </div>
           <div className="stat-card">
             <div className="stat-label">Count</div>
-            {summary.isLoading ? (
+            {stripLoading ? (
               <Skeleton height={30} width="70%" />
             ) : (
               <div className="stat-value accent">
-                {(summary.data?.transactionCount ?? 0).toLocaleString()}
+                {(stripData?.transactionCount ?? 0).toLocaleString()}
               </div>
             )}
           </div>
@@ -551,6 +776,7 @@ export default function Transactions() {
               <th>Date</th>
               <th>Description</th>
               <th>Category</th>
+              <th>Merchant</th>
               <th>Account</th>
               <th>Type</th>
               <th>Source</th>
@@ -575,19 +801,34 @@ export default function Transactions() {
                   <td style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                     {formatDate(new Date(t.date))}
                   </td>
-                  <td
-                    style={{
-                      maxWidth: 280,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {t.description}
-                    {lowConf && (
-                      <span className="badge badge-warning" style={{ marginLeft: 8 }}>
-                        review
-                      </span>
+                  <td style={{ maxWidth: 280 }}>
+                    <div
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {t.description}
+                      {lowConf && (
+                        <span className="badge badge-warning" style={{ marginLeft: 8 }}>
+                          review
+                        </span>
+                      )}
+                    </div>
+                    {t.remarks && t.remarks !== t.description && (
+                      <div
+                        title={t.remarks}
+                        style={{
+                          fontSize: 11,
+                          color: 'var(--text-dim)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {t.remarks}
+                      </div>
                     )}
                   </td>
                   <td>
@@ -621,6 +862,28 @@ export default function Transactions() {
                       </button>
                     ) : (
                       <span style={{ color: 'var(--text-dim)' }}>—</span>
+                    )}
+                  </td>
+                  <td>
+                    {t.merchant ? (
+                      <button
+                        type="button"
+                        className="badge"
+                        title={`Filter by ${t.merchant}`}
+                        onClick={() => setParam('merchant', t.merchant ?? '')}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        {t.merchant}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontSize: 11, color: 'var(--text-dim)' }}
+                        onClick={() => openRuleModal(t)}
+                      >
+                        + tag
+                      </button>
                     )}
                   </td>
                   <td style={{ color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
@@ -674,6 +937,9 @@ export default function Transactions() {
         )}
       </div>
 
+      {/* ---------- Merchant rules ---------- */}
+      <MerchantRulesCard rules={rules.data ?? []} categories={sortedCategories} />
+
       {/* ---------- Add / Edit modal ---------- */}
       {modalTx !== undefined && (
         <TransactionModal
@@ -681,6 +947,17 @@ export default function Transactions() {
           accounts={accounts.data ?? []}
           categories={sortedCategories}
           onClose={() => setModalTx(undefined)}
+          onCreateRule={openRuleModal}
+        />
+      )}
+
+      {/* ---------- Tag-rule modal ---------- */}
+      {rulePrefill !== null && (
+        <TagRuleModal
+          open
+          initialPattern={rulePrefill.pattern}
+          initialMerchant={rulePrefill.merchant}
+          onClose={() => setRulePrefill(null)}
         />
       )}
     </div>

@@ -5,7 +5,8 @@ import type { Db } from '../db/index.js'
 import type { LLMPool } from '../llm/pool.js'
 import type { EmailEvent } from '../imap/watcher.js'
 import { detectRecurring } from './recurring-detector.js'
-import { ruleCategory, assignCategory } from './categories.js'
+import { ruleCategory, assignCategory, assignCategoryById } from './categories.js'
+import { loadRules, matchRule } from './merchant-rules.js'
 
 interface BankEntry { name: string; currency: string; accountId?: number }
 
@@ -60,7 +61,7 @@ export class Processor {
         jobId: randomUUID(),
         type: 'parse',
         payload: { subject: email.subject, body: email.bodyText, bankName: bank.name },
-      }) as { amount: number; type: string; description: string; currency: string; balance_after?: number | null; confidence: number; date?: string }
+      }) as { amount: number; type: string; description: string; remarks?: string | null; currency: string; balance_after?: number | null; confidence: number; date?: string }
 
       // Zero/negative amounts mean the LLM force-fit a non-transaction notice
       if (!(parsed.amount > 0)) {
@@ -76,12 +77,17 @@ export class Processor {
         txDate = email.receivedAt
       }
 
+      // User-taught merchant rules take precedence over everything else
+      const merchantRule = matchRule(await loadRules(this.db), parsed.remarks, parsed.description)
+
       const [txn] = await this.db.insert(transactions).values({
         accountId: bank.accountId!,
         date: txDate,
         amount: parsed.amount,
         type: parsed.type as 'debit' | 'credit',
         description: parsed.description,
+        remarks: parsed.remarks ?? null,
+        merchant: merchantRule?.merchant ?? null,
         currency: parsed.currency,
         balanceAfter: parsed.balance_after ?? null,
         source: 'email',
@@ -92,19 +98,23 @@ export class Processor {
 
       await this.db.update(rawEmails).set({ status: 'processed' }).where(eq(rawEmails.id, savedEmail.id))
 
-      // Categorize: cheap keyword rules first, LLM only when ambiguous.
+      // Categorize: user merchant rule first, then keyword rules, then LLM.
       // Never let categorization failure fail the whole email.
       try {
-        let categoryName: string | null = ruleCategory(parsed.description, parsed.type as 'debit' | 'credit')
-        if (!categoryName) {
-          const res = await this.pool.run({
-            jobId: randomUUID(),
-            type: 'categorize',
-            payload: { description: parsed.description, txType: parsed.type as 'debit' | 'credit', amount: parsed.amount },
-          }) as { category?: string } | undefined
-          categoryName = res?.category ?? null
+        if (merchantRule?.categoryId != null) {
+          await assignCategoryById(this.db, txn.id, merchantRule.categoryId)
+        } else {
+          let categoryName: string | null = ruleCategory(parsed.description, parsed.type as 'debit' | 'credit')
+          if (!categoryName) {
+            const res = await this.pool.run({
+              jobId: randomUUID(),
+              type: 'categorize',
+              payload: { description: parsed.description, txType: parsed.type as 'debit' | 'credit', amount: parsed.amount },
+            }) as { category?: string } | undefined
+            categoryName = res?.category ?? null
+          }
+          if (categoryName) await assignCategory(this.db, txn.id, categoryName)
         }
-        if (categoryName) await assignCategory(this.db, txn.id, categoryName)
       } catch (err) {
         console.warn('[PROCESSOR] Categorization failed for txn', txn.id, err)
       }

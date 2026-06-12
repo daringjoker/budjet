@@ -15,7 +15,7 @@ export function buildClassifyPrompt(payload: { subject: string; body: string; ba
   return `You are a financial email classifier for ${payload.bankName}.
 
 Email subject: ${payload.subject}
-Email body (first 500 chars): ${payload.body.slice(0, 500)}
+Email body (first 800 chars): ${payload.body.slice(0, 800)}
 
 Classify this email. Reply with JSON only.
 - type: "transaction" if this is a bank transaction notification (debit, credit, transfer, payment)

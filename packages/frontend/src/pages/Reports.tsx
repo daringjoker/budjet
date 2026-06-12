@@ -310,7 +310,13 @@ export default function Reports() {
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        {m.description}
+                        {m.isMerchant ? (
+                          <span className="badge" title={m.description}>
+                            {m.description}
+                          </span>
+                        ) : (
+                          m.description
+                        )}
                       </td>
                       <td className="num" style={{ color: 'var(--text-muted)' }}>
                         {m.count}

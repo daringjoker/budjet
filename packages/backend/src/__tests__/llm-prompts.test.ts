@@ -24,13 +24,16 @@ describe('classify prompt', () => {
 })
 
 describe('parse prompt', () => {
-  it('buildParsePrompt includes bankName and truncates body to 1000 chars', () => {
-    const longBody = 'x'.repeat(2000)
+  it('buildParsePrompt includes bankName and caps very long bodies at 6000 chars', () => {
+    const longBody = 'x'.repeat(10_000)
     const prompt = buildParsePrompt({ subject: 'Debit Alert', body: longBody, bankName: 'Nabil Bank' })
     expect(prompt).toContain('Nabil Bank')
     expect(prompt).toContain('Debit Alert')
-    // Body is truncated to 1000 chars
-    expect(prompt.length).toBeLessThan(2000)
+    // Body is capped at 6000 chars so the worker's 4096-token context fits
+    expect(prompt.length).toBeLessThan(7000)
+    // A typical full bank email is NOT truncated
+    const typical = 'y'.repeat(1500)
+    expect(buildParsePrompt({ subject: 'S', body: typical, bankName: 'B' })).toContain(typical)
   })
 
   it('parse schema has required amount, type, description, currency, confidence', () => {

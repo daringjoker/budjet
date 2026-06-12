@@ -112,11 +112,15 @@ export const reportsRouter = router({
       limit: z.number().int().min(1).max(50).default(10),
     }))
     .query(async ({ ctx, input }) => {
+      // Tagged merchants group all their patterns together; untagged rows
+      // fall back to grouping by description
+      const label = sql<string>`coalesce(${transactions.merchant}, ${transactions.description})`
       const rows = await ctx.db
         .select({
-          description: transactions.description,
+          description: label,
           total: sum(transactions.amount),
           count: sql<number>`count(*)`,
+          isMerchant: sql<number>`max(${transactions.merchant} is not null)`,
         })
         .from(transactions)
         .where(and(
@@ -124,10 +128,15 @@ export const reportsRouter = router({
           lte(transactions.date, new Date(input.to)),
           eq(transactions.type, 'debit'),
         ))
-        .groupBy(transactions.description)
+        .groupBy(label)
         .orderBy(desc(sum(transactions.amount)))
         .limit(input.limit)
 
-      return rows.map(r => ({ description: r.description, total: Number(r.total ?? 0), count: Number(r.count) }))
+      return rows.map(r => ({
+        description: r.description,
+        total: Number(r.total ?? 0),
+        count: Number(r.count),
+        isMerchant: Boolean(r.isMerchant),
+      }))
     }),
 })

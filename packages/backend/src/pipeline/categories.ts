@@ -77,3 +77,11 @@ export async function assignCategory(db: Db, transactionId: number, categoryName
     .values({ transactionId, categoryId: cat.id })
     .onConflictDoNothing()
 }
+
+/** Replace a transaction's category with the given id. */
+export async function assignCategoryById(db: Db, transactionId: number, categoryId: number) {
+  await db.delete(transactionCategories).where(eq(transactionCategories.transactionId, transactionId))
+  await db.insert(transactionCategories)
+    .values({ transactionId, categoryId })
+    .onConflictDoNothing()
+}

@@ -8,6 +8,7 @@ export const PARSE_SCHEMA = {
     amount: { type: 'number' as const, minimum: 0 },
     type: { type: 'string' as const, enum: ['debit', 'credit'] },
     description: { type: 'string' as const },
+    remarks: { type: ['string', 'null'] as any },
     currency: { type: 'string' as const },
     balance_after: { type: ['number', 'null'] as any },
     confidence: { type: 'number' as const, minimum: 0, maximum: 1 },
@@ -21,6 +22,7 @@ export interface ParsedTransaction {
   amount: number
   type: 'debit' | 'credit'
   description: string
+  remarks?: string | null
   currency: string
   balance_after?: number | null
   confidence: number
@@ -32,12 +34,13 @@ export function buildParsePrompt(payload: { subject: string; body: string; bankN
 Extract the transaction details from this bank notification email.
 
 Email subject: ${payload.subject}
-Email body: ${payload.body.slice(0, 1000)}
+Email body: ${payload.body.slice(0, 6000)}
 
 Extract and reply with JSON only:
 - amount: transaction amount as a positive number
 - type: "debit" if money left the account, "credit" if money entered
 - description: merchant name or transaction description (concise, max 100 chars)
+- remarks: the COMPLETE remarks/reference/narration text from the email, copied verbatim and unabridged (including any phone numbers, reference IDs and names); null if the email has none
 - currency: currency code (e.g. NPR, USD)
 - date: transaction date in ISO 8601 format (use email date if not found in body)
 - balance_after: account balance after transaction if mentioned, null otherwise
@@ -54,7 +57,7 @@ export async function parseTransaction(
   // The context has a finite sequence pool — dispose or the next call throws.
   try {
     const session = new LlamaChatSession({ contextSequence: sequence })
-    const response = await session.prompt(buildParsePrompt(payload), { grammar, maxTokens: 256 })
+    const response = await session.prompt(buildParsePrompt(payload), { grammar, maxTokens: 512 })
     return JSON.parse(response)
   } finally {
     sequence.dispose()

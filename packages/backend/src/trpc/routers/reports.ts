@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { router, publicProcedure } from '../trpc.js'
 import { transactions, transactionCategories, categories } from '@budjet/shared/schema'
-import { eq, and, gte, lte, sum, desc, sql, inArray } from 'drizzle-orm'
+import { eq, and, gte, lte, sum, desc, sql, inArray, or, lt, isNotNull } from 'drizzle-orm'
+import { DEFAULT_CONFIDENCE_THRESHOLD } from '@budjet/shared'
 
 export const reportsRouter = router({
   summary: publicProcedure
@@ -10,6 +11,10 @@ export const reportsRouter = router({
       to: z.string().datetime(),
       accountId: z.number().optional(),
       categoryId: z.number().optional(),
+      merchant: z.string().optional(),
+      q: z.string().optional(),
+      type: z.enum(['debit', 'credit']).optional(),
+      lowConfidenceOnly: z.boolean().optional(),
     }))
     .query(async ({ ctx, input }) => {
       const baseFilters = [
@@ -17,6 +22,20 @@ export const reportsRouter = router({
         lte(transactions.date, new Date(input.to)),
       ]
       if (input.accountId) baseFilters.push(eq(transactions.accountId, input.accountId))
+      if (input.merchant) baseFilters.push(eq(transactions.merchant, input.merchant))
+      if (input.type) baseFilters.push(eq(transactions.type, input.type))
+      if (input.lowConfidenceOnly) {
+        baseFilters.push(lt(transactions.llmConfidence, DEFAULT_CONFIDENCE_THRESHOLD))
+        baseFilters.push(isNotNull(transactions.llmConfidence))
+      }
+      if (input.q && input.q.trim().length > 0) {
+        const pat = `%${input.q.trim().toLowerCase()}%`
+        baseFilters.push(or(
+          sql`lower(${transactions.description}) LIKE ${pat}`,
+          sql`lower(coalesce(${transactions.remarks}, '')) LIKE ${pat}`,
+          sql`lower(coalesce(${transactions.merchant}, '')) LIKE ${pat}`,
+        )!)
+      }
       if (input.categoryId) {
         const ids = (await ctx.db
           .select({ id: transactionCategories.transactionId })

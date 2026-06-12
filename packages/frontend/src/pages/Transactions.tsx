@@ -412,15 +412,20 @@ export default function Transactions() {
     from: fromISO,
     to: toISO,
     lowConfidenceOnly: reviewOnly || undefined,
-    limit: 100,
+    limit: 200,
   })
 
-  // Summary covers everything when no date filter is set.
+  // Summary mirrors the list query's filters exactly and is always
+  // server-computed over the FULL matching set (wide window when no dates).
   const summary = trpc.reports.summary.useQuery({
     from: fromISO ?? new Date('2000-01-01').toISOString(),
     to: toISO ?? new Date(`${ymd(new Date())}T23:59:59.999Z`).toISOString(),
     accountId,
     categoryId,
+    merchant: merchantParam || undefined,
+    q: qParam.trim() || undefined,
+    type: typeFilter,
+    lowConfidenceOnly: reviewOnly || undefined,
   })
 
   const accounts = trpc.accounts.list.useQuery()
@@ -457,28 +462,9 @@ export default function Transactions() {
     })
   }
 
-  // reports.summary doesn't accept merchant/text filters, so when either is
-  // active we compute the strip's four numbers client-side from the loaded list.
   const merchantActive = merchantParam !== ''
-  const qActive = qParam.trim() !== ''
-  const clientSide = merchantActive || qActive
-  const clientSummary = useMemo(() => {
-    let totalIn = 0
-    let totalOut = 0
-    for (const t of transactions.data ?? []) {
-      if (t.type === 'credit') totalIn += t.amount
-      else totalOut += t.amount
-    }
-    return {
-      totalIn,
-      totalOut,
-      net: totalIn - totalOut,
-      transactionCount: transactions.data?.length ?? 0,
-    }
-  }, [transactions.data])
-
-  const stripData = clientSide ? clientSummary : summary.data
-  const stripLoading = clientSide ? transactions.isLoading : summary.isLoading
+  const stripData = summary.data
+  const stripLoading = summary.isLoading
   const net = stripData?.net ?? 0
 
   // ----- CSV export of the currently loaded (filtered) rows -----
@@ -928,6 +914,23 @@ export default function Transactions() {
             hint="Try adjusting the filters above, or add one manually"
           />
         )}
+        {transactions.data &&
+          transactions.data.length > 0 &&
+          summary.data &&
+          summary.data.transactionCount > transactions.data.length && (
+            <div
+              style={{
+                textAlign: 'center',
+                fontSize: 12,
+                color: 'var(--text-dim)',
+                padding: '10px 0',
+              }}
+            >
+              Showing latest {transactions.data.length} of{' '}
+              {summary.data.transactionCount.toLocaleString()} transactions — refine filters or
+              export CSV for the rest.
+            </div>
+          )}
       </div>
 
 

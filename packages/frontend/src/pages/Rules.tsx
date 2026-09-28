@@ -7,6 +7,7 @@ import { useToast } from "../components/ui/Toast"
 import { trpc } from "../trpc"
 import EmptyState from "../components/ui/EmptyState"
 import ConfirmDialog from "../components/ui/ConfirmDialog"
+import TagRuleModal from "../components/TagRuleModal"
 
 interface MerchantRule {
   id: number
@@ -18,9 +19,11 @@ interface MerchantRule {
 function MerchantRulesCard({
   rules,
   categories,
+  onAddRule,
 }: {
   rules: MerchantRule[]
   categories: Array<{ id: number; name: string }>
+  onAddRule: () => void
 }) {
   const toast = useToast()
   const utils = trpc.useUtils()
@@ -46,7 +49,12 @@ function MerchantRulesCard({
 
   return (
     <div className="card">
-      <h2 className="card-title">Rules</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h2 className="card-title">Rules</h2>
+        <button type="button" className="btn btn-primary btn-sm" onClick={onAddRule}>
+          Add rule
+        </button>
+      </div>
       {rules.length ? (
         <div className="table-wrap">
           <table className="table">
@@ -121,14 +129,21 @@ function MerchantRulesCard({
 export function Rules() {
   const rules = trpc.merchants.rules.useQuery()
   const categories = trpc.categories.list.useQuery()
-
+  const [addRuleOpen, setAddRuleOpen] = useState(false)
 
   const sortedCategories = useMemo(
     () => [...(categories.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
     [categories.data]
   )
 
-
-  return < MerchantRulesCard rules={rules.data ?? []} categories={sortedCategories} />
-
+  return (
+    <>
+      <MerchantRulesCard
+        rules={rules.data ?? []}
+        categories={sortedCategories}
+        onAddRule={() => setAddRuleOpen(true)}
+      />
+      <TagRuleModal open={addRuleOpen} onClose={() => setAddRuleOpen(false)} />
+    </>
+  )
 }

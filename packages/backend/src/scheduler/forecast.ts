@@ -1,4 +1,4 @@
-import { and, eq, gte, lt, lte, sum } from 'drizzle-orm'
+import { and, eq, gte, inArray, lt, lte, sum } from 'drizzle-orm'
 import { transactions, predictedTransactions, budgets, budgetAlerts, recurringTransactions } from '@budjet/shared/schema'
 import { getBudgetWindow } from '../pipeline/budget-window.js'
 import type { Db } from '../db/index.js'
@@ -15,8 +15,11 @@ export async function runNightlyForecast(db: Db, lookbackDays: number): Promise<
     await db.update(predictedTransactions).set({ status: 'missed' }).where(eq(predictedTransactions.id, p.id))
   }
 
-  // 2. Generate recurring predicted entries for next 30 days
-  const activeRecurring = await db.select().from(recurringTransactions).where(eq(recurringTransactions.status, 'active'))
+  // 2. Generate recurring predicted entries for the forecast horizon.
+  // Include pending_confirmation so auto-detected patterns show up even before
+  // the user explicitly confirms them.
+  const activeRecurring = await db.select().from(recurringTransactions)
+    .where(inArray(recurringTransactions.status, ['active', 'pending_confirmation']))
   const horizon = new Date(now.getTime() + lookbackDays * 86_400_000)
 
   for (const r of activeRecurring) {
@@ -38,7 +41,7 @@ export async function runNightlyForecast(db: Db, lookbackDays: number): Promise<
           categoryId: r.categoryId,
           predictedAmount: r.amount,
           predictedDate: next,
-          confidence: 0.9,
+          confidence: r.status === 'active' ? 0.9 : 0.7,
           basis: 'recurring_pattern',
           status: 'pending',
           createdAt: now,

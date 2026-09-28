@@ -470,6 +470,16 @@ export default function Transactions() {
   const stripLoading = summary.isLoading
   const net = stripData?.net ?? 0
 
+  // ----- Retroactive transfer linking -----
+  const utils = trpc.useUtils()
+  const linkTransfers = trpc.transactions.linkTransfers.useMutation({
+    onSuccess: result => {
+      toast.success(result.linked > 0 ? `Linked ${result.linked} transfer pair(s)` : 'No new transfer pairs found')
+      utils.transactions.list.invalidate()
+    },
+    onError: err => toast.error(err.message),
+  })
+
   // ----- CSV export of the currently loaded (filtered) rows -----
   const exportCsv = useCallback(() => {
     const rows = transactions.data ?? []
@@ -654,6 +664,14 @@ export default function Transactions() {
           onClick={exportCsv}
         >
           Export CSV
+        </button>
+        <button
+          type="button"
+          className={`btn btn-ghost${linkTransfers.isPending ? ' is-loading' : ''}`}
+          disabled={linkTransfers.isPending}
+          onClick={() => linkTransfers.mutate()}
+        >
+          Link transfers
         </button>
         <button type="button" className="btn btn-primary" onClick={() => setModalTx(null)}>
           <IconPlus size={15} /> Add transaction

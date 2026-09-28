@@ -2,10 +2,14 @@
   "name": "@budjet/cli",
   "version": "0.0.1",
   "type": "module",
-  "bin": { "budjet": "./dist/index.js" },
-  "files": ["dist"],
+  "bin": {
+    "budjet": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "cli": "tsx src/index.ts",
     "build": "tsc && chmod +x dist/index.js"
   },
   "dependencies": {

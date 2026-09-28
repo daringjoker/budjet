@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { trpc } from '../trpc.js'
 import { Link, useNavigate } from 'react-router-dom'
+import Modal from '../components/ui/Modal.js'
 import {
   BarChart,
   Bar,
@@ -127,6 +129,42 @@ export default function Dashboard() {
     },
     onError: err => toast.error(err.message),
   })
+
+  const categories = trpc.categories.list.useQuery()
+
+  const [addOpen, setAddOpen] = useState(false)
+  const [anticipatedForm, setAnticipatedForm] = useState({
+    accountId: '',
+    amount: '',
+    date: '',
+    notes: '',
+    categoryId: '',
+  })
+
+  const createAnticipated = trpc.predicted.createAnticipated.useMutation({
+    onSuccess: () => {
+      toast.success('Anticipated expense added')
+      setAddOpen(false)
+      setAnticipatedForm({ accountId: '', amount: '', date: '', notes: '', categoryId: '' })
+      utils.predicted.list.invalidate()
+    },
+    onError: err => toast.error(err.message),
+  })
+
+  const handleAddAnticipated = () => {
+    const amount = parseFloat(anticipatedForm.amount)
+    if (!anticipatedForm.accountId || isNaN(amount) || amount <= 0 || !anticipatedForm.date) {
+      toast.error('Account, amount, and date are required')
+      return
+    }
+    createAnticipated.mutate({
+      accountId: Number(anticipatedForm.accountId),
+      predictedAmount: amount,
+      predictedDate: new Date(anticipatedForm.date).toISOString(),
+      notes: anticipatedForm.notes || undefined,
+      categoryId: anticipatedForm.categoryId ? Number(anticipatedForm.categoryId) : undefined,
+    })
+  }
 
   // ----- This-month stats + vs-last-month deltas (from trend) -----
   const income = summary.data?.totalIn ?? 0
@@ -441,14 +479,23 @@ export default function Dashboard() {
             <h2 className="card-title" style={{ marginBottom: 0 }}>
               Upcoming
             </h2>
-            <button
-              type="button"
-              className={`btn btn-ghost btn-sm${forecast.isPending ? ' is-loading' : ''}`}
-              disabled={forecast.isPending}
-              onClick={() => forecast.mutate()}
-            >
-              Run forecast
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setAddOpen(true)}
+              >
+                + Add
+              </button>
+              <button
+                type="button"
+                className={`btn btn-ghost btn-sm${forecast.isPending ? ' is-loading' : ''}`}
+                disabled={forecast.isPending}
+                onClick={() => forecast.mutate()}
+              >
+                Run forecast
+              </button>
+            </div>
           </div>
           {upcoming.isLoading ? (
             <Skeleton height={20} count={5} />
@@ -586,6 +633,95 @@ export default function Dashboard() {
           <EmptyState title="No transactions yet" hint="Imported transactions will show up here" />
         )}
       </div>
+
+      <Modal
+        open={addOpen}
+        title="Add anticipated expense"
+        onClose={() => setAddOpen(false)}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setAddOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={`btn btn-primary${createAnticipated.isPending ? ' is-loading' : ''}`}
+              disabled={createAnticipated.isPending}
+              onClick={handleAddAnticipated}
+            >
+              Save
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: 'grid', gap: 14 }}>
+          <div className="field">
+            <label>Account</label>
+            <select
+              className="select"
+              value={anticipatedForm.accountId}
+              onChange={e => setAnticipatedForm(f => ({ ...f, accountId: e.target.value }))}
+            >
+              <option value="">Select account…</option>
+              {(balances.data ?? []).map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({a.currency})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Amount</label>
+            <input
+              type="number"
+              className="input"
+              min="0.01"
+              step="0.01"
+              placeholder="0.00"
+              value={anticipatedForm.amount}
+              onChange={e => setAnticipatedForm(f => ({ ...f, amount: e.target.value }))}
+            />
+          </div>
+          <div className="field">
+            <label>Date</label>
+            <input
+              type="date"
+              className="input"
+              value={anticipatedForm.date}
+              onChange={e => setAnticipatedForm(f => ({ ...f, date: e.target.value }))}
+            />
+          </div>
+          <div className="field">
+            <label>Category (optional)</label>
+            <select
+              className="select"
+              value={anticipatedForm.categoryId}
+              onChange={e => setAnticipatedForm(f => ({ ...f, categoryId: e.target.value }))}
+            >
+              <option value="">No category</option>
+              {(categories.data ?? []).map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Note (optional)</label>
+            <input
+              type="text"
+              className="input"
+              placeholder="e.g. Rent, Insurance…"
+              value={anticipatedForm.notes}
+              onChange={e => setAnticipatedForm(f => ({ ...f, notes: e.target.value }))}
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

@@ -7,6 +7,7 @@ import type { EmailEvent } from '../imap/watcher.js'
 import { detectRecurring } from './recurring-detector.js'
 import { ruleCategory, assignCategory, assignCategoryById } from './categories.js'
 import { loadRules, matchRule } from './merchant-rules.js'
+import { findTransferCounterpart, linkTransactions } from './transfer-detector.js'
 
 interface BankEntry { name: string; currency: string; accountId?: number }
 
@@ -100,6 +101,7 @@ export class Processor {
 
       // Categorize: user merchant rule first, then keyword rules, then LLM.
       // Never let categorization failure fail the whole email.
+      let resolvedCategory: string | null = null
       try {
         if (merchantRule?.categoryId != null) {
           await assignCategoryById(this.db, txn.id, merchantRule.categoryId)
@@ -113,10 +115,50 @@ export class Processor {
             }) as { category?: string } | undefined
             categoryName = res?.category ?? null
           }
-          if (categoryName) await assignCategory(this.db, txn.id, categoryName)
+          if (categoryName) {
+            await assignCategory(this.db, txn.id, categoryName)
+            resolvedCategory = categoryName
+          }
         }
       } catch (err) {
         console.warn('[PROCESSOR] Categorization failed for txn', txn.id, err)
+      }
+
+      // Cash withdrawal → auto-create a credit in the Cash account so the money
+      // doesn't disappear from the user's net worth view.
+      if (parsed.type === 'debit' && resolvedCategory === 'Cash & ATM') {
+        try {
+          const [cashAccount] = await this.db.select().from(accounts).where(eq(accounts.type, 'cash'))
+          if (cashAccount) {
+            const [cashCredit] = await this.db.insert(transactions).values({
+              accountId: cashAccount.id,
+              date: txDate,
+              amount: parsed.amount,
+              type: 'credit',
+              description: `Cash from ${bank.name}`,
+              currency: parsed.currency,
+              source: 'email',
+              rawEmailId: savedEmail.id,
+              createdAt: new Date(),
+            }).returning()
+            await linkTransactions(this.db, txn.id, cashCredit.id)
+          }
+        } catch (err) {
+          console.warn('[PROCESSOR] Failed to create cash counterpart for txn', txn.id, err)
+        }
+      }
+
+      // Bank-to-bank transfer → look for a matching counterpart in another account.
+      if (resolvedCategory === 'Transfers') {
+        try {
+          const counterpart = await findTransferCounterpart(this.db, txn)
+          if (counterpart) {
+            await linkTransactions(this.db, txn.id, counterpart.id)
+            console.log(`[PROCESSOR] Linked transfer pair: txn ${txn.id} ↔ ${counterpart.id}`)
+          }
+        } catch (err) {
+          console.warn('[PROCESSOR] Transfer detection failed for txn', txn.id, err)
+        }
       }
 
       if (parsed.confidence >= this.confidenceThreshold) {

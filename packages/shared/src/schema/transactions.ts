@@ -19,6 +19,10 @@ export const transactions = sqliteTable('transactions', {
   rawEmailId: integer('raw_email_id').references(() => rawEmails.id, { onDelete: 'set null' }),
   llmConfidence: real('llm_confidence'),
   recurringId: integer('recurring_id').references(() => recurringTransactions.id, { onDelete: 'set null' }),
+  // Links the two legs of a transfer (cash withdrawal ↔ cash credit, or bank-to-bank).
+  // FK constraint (→ transactions.id ON DELETE SET NULL) is enforced by the migration only
+  // to avoid the TypeScript circular-initializer error on self-referential schemas.
+  linkedTransactionId: integer('linked_transaction_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 })
 

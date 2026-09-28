@@ -3,8 +3,9 @@ import { TRPCError } from '@trpc/server'
 import { router, publicProcedure } from '../trpc.js'
 import { transactions, transactionCategories, categories } from '@budjet/shared/schema'
 import { DEFAULT_CONFIDENCE_THRESHOLD } from '@budjet/shared'
-import { eq, and, gte, lte, lt, isNotNull, desc, inArray, or, sql } from 'drizzle-orm'
+import { eq, and, gte, lte, lt, isNotNull, isNull, desc, inArray, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.js'
+import { findTransferCounterpart, linkTransactions } from '../../pipeline/transfer-detector.js'
 
 async function txnIdsForCategory(db: Db, categoryId: number): Promise<number[]> {
   const rows = await db
@@ -174,4 +175,33 @@ export const transactionsRouter = router({
       }
       return updated
     }),
+
+  linkTransfers: publicProcedure.mutation(async ({ ctx }) => {
+    const [cat] = await ctx.db.select({ id: categories.id })
+      .from(categories)
+      .where(eq(categories.name, 'Transfers'))
+    if (!cat) return { linked: 0 }
+
+    const rows = await ctx.db
+      .select({ txn: transactions })
+      .from(transactions)
+      .innerJoin(transactionCategories, eq(transactionCategories.transactionId, transactions.id))
+      .where(and(
+        eq(transactionCategories.categoryId, cat.id),
+        isNull(transactions.linkedTransactionId),
+      ))
+
+    let linked = 0
+    const done = new Set<number>()
+    for (const { txn } of rows) {
+      if (done.has(txn.id)) continue
+      const counterpart = await findTransferCounterpart(ctx.db, txn)
+      if (counterpart) {
+        await linkTransactions(ctx.db, txn.id, counterpart.id)
+        done.add(counterpart.id)
+        linked++
+      }
+    }
+    return { linked }
+  }),
 })

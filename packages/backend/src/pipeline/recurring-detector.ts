@@ -3,14 +3,23 @@ import { transactions, recurringTransactions } from '@budjet/shared/schema'
 import type { Db } from '../db/index.js'
 import type { Transaction } from '@budjet/shared/schema'
 
-const LOOKBACK_DAYS = 90
+const DEFAULT_LOOKBACK_DAYS = 90
 const MIN_OCCURRENCES = 3
-const AMOUNT_TOLERANCE = 0.1 // 10%
 
-export async function detectRecurring(db: Db, txn: Transaction) {
-  if (!txn.description) return
+export async function detectRecurring(db: Db, txn: Transaction, lookbackDays = DEFAULT_LOOKBACK_DAYS): Promise<boolean> {
+  if (!txn.description) return false
 
-  const since = new Date(Date.now() - LOOKBACK_DAYS * 86_400_000)
+  // Skip if this description/account is already tracked
+  const existing = await db.select({ id: recurringTransactions.id })
+    .from(recurringTransactions)
+    .where(and(
+      eq(recurringTransactions.accountId, txn.accountId),
+      eq(recurringTransactions.type, txn.type),
+      sql`lower(${recurringTransactions.name}) = lower(${txn.description})`,
+    ))
+  if (existing.length > 0) return false
+
+  const since = new Date(Date.now() - lookbackDays * 86_400_000)
 
   const similar = await db
     .select()
@@ -25,12 +34,10 @@ export async function detectRecurring(db: Db, txn: Transaction) {
     )
     .orderBy(transactions.date)
 
-  if (similar.length < MIN_OCCURRENCES) return
+  if (similar.length < MIN_OCCURRENCES) return false
 
   const amounts = similar.map(t => t.amount)
   const avgAmount = amounts.reduce((a, b) => a + b, 0) / amounts.length
-  const withinTolerance = amounts.every(a => Math.abs(a - avgAmount) / avgAmount <= AMOUNT_TOLERANCE)
-  if (!withinTolerance) return
 
   // Estimate average interval in days
   const intervals: number[] = []
@@ -47,7 +54,7 @@ export async function detectRecurring(db: Db, txn: Transaction) {
   else if (avgInterval < 120) frequency = 'quarterly'
   else if (avgInterval < 400) frequency = 'yearly'
 
-  if (!frequency) return
+  if (!frequency) return false
 
   const nextDue = new Date(txn.date.getTime() + avgInterval * 86_400_000)
 
@@ -61,9 +68,10 @@ export async function detectRecurring(db: Db, txn: Transaction) {
     startDate: similar[0].date,
     nextDueDate: nextDue,
     autoDetected: true,
-    toleranceAmount: avgAmount * AMOUNT_TOLERANCE,
+    toleranceAmount: 0,
     toleranceDays: 3,
     status: 'pending_confirmation',
     createdAt: new Date(),
   })
+  return true
 }
